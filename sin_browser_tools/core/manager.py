@@ -480,6 +480,18 @@ class _ManagerProxy:
     # --- Forwarding fuer alle anderen Methoden ---
 
     def __getattr__(self, name: str):
+        # Private/Dunder-/Marker-Attribute NICHT an _require() weiterleiten.
+        # Sonst wirft das Proxy RuntimeError statt AttributeError, sobald Python
+        # oder Bibliotheken probehalber nach Sondernamen fragen -- z.B.
+        # inspect.iscoroutinefunction -> getattr(obj, "_is_coroutine_marker"),
+        # copy/pickle -> "__deepcopy__"/"__reduce_ex__", asyncio -> "__await__".
+        # Das bricht den getattr(obj, name, default)- und hasattr()-Vertrag und
+        # laesst jede Introspektion abstuerzen, solange noch kein Manager
+        # registriert ist (genau das blockierte catalog.discover() und damit den
+        # Auto-Start des MCP-Servers). Fuer solche Namen sauber AttributeError
+        # signalisieren; nur echte, oeffentliche Methoden werden weitergeleitet.
+        if name.startswith("_"):
+            raise AttributeError(name)
         return getattr(self._require(), name)
 
     # --- Eigene async-Methoden als Shortcut ---

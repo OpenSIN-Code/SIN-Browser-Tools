@@ -38,7 +38,14 @@ async def handle_list_tools() -> list[types.Tool]:
 async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     arguments = arguments or {}
     try:
-        if not manager.page:
+        # BUGFIX: Frueher stand hier 'if not manager.page'. Das Proxy-Property
+        # 'page' ruft intern _require() auf und WIRFT RuntimeError, solange noch
+        # kein BrowserManager registriert ist -- also genau beim allerersten
+        # Tool-Call. Folge: der Browser wurde nie automatisch gestartet, jeder
+        # erste Call schlug mit RuntimeError fehl. Wir pruefen jetzt
+        # exception-frei, ob bereits eine aktive Page existiert.
+        current_page = getattr(manager._instance, "_page", None)
+        if current_page is None:
             await manager.start_local(headless=True)
 
         fn = _TOOLS.get(name)

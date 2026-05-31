@@ -4,7 +4,7 @@ import logging
 import weakref
 import websockets
 from typing import Optional, Dict, Any, List
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page, ElementHandle
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 logger = logging.getLogger(__name__)
 

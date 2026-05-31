@@ -4,7 +4,6 @@ Ersetzen und erweitern die Basis-Tools um Enterprise-Faehigkeiten:
 OOPIF-Support, Shadow-DOM-Piercing, Session-Management, PII-Redaction.
 """
 
-import asyncio
 from typing import Any, Optional
 from urllib.parse import urlparse
 

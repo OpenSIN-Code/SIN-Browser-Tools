@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from sin_browser_tools.core import manager
 
@@ -435,10 +436,20 @@ async def browser_click_by_text(
         # No role specified -- search broadly (buttons, links, clickables)
         selectors = ["button", "a", "[role=button]", "[role=link]", "[onclick]"]
     
+    # Bei exact=True einen anker-genauen, case-insensitiven Text-Filter bauen.
+    # BUGFIX: Frueher wurde 'has_text=keyword if not exact else exact'
+    # uebergeben -- bei exact=True landete also der Bool True (statt des
+    # Suchtexts) im has_text-Filter, der dadurch wirkungslos war.
+    text_filter = (
+        re.compile(rf"^\s*{re.escape(keyword)}\s*$", re.IGNORECASE)
+        if exact
+        else keyword
+    )
+
     locator = None
     for sel in selectors:
         try:
-            loc = page.locator(sel, has_text=keyword if not exact else exact)
+            loc = page.locator(sel, has_text=text_filter)
             count = await loc.count()
             if count > 0:
                 locator = loc.first

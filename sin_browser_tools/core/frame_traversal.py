@@ -12,7 +12,6 @@ CDP-Session (Accessibility.getFullAXTree). Hinweis: Eine
 hier genutzte Aufruf war ein No-Op, der den AX-Tree immer leer liess.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -35,6 +34,12 @@ class FrameInfo:
     shadow_roots: list = field(default_factory=list)
     error: Optional[str] = None
     html_length: int = 0
+    # Die zugrunde liegende Playwright-Frame-Instanz. Konsumenten (z.B.
+    # tools/accessibility.py) brauchen sie, um eine CDP-Session an genau diesen
+    # Frame zu binden. NICHT JSON-serialisierbar -- Konsumenten, die FrameInfo
+    # serialisieren, muessen dieses Feld auslassen (deep_snapshot baut sein
+    # frame_data ohnehin manuell auf).
+    frame: Optional[Frame] = None
 
 
 class UnifiedFrameTraverser:
@@ -71,6 +76,7 @@ class UnifiedFrameTraverser:
                         parent_url=frame.parent_frame.url if frame.parent_frame else None,
                         frame_type="error",
                         error=str(e),
+                        frame=frame,
                     )
                 )
 
@@ -193,6 +199,7 @@ class UnifiedFrameTraverser:
             ax_tree=ax_tree,
             shadow_roots=shadow_roots,
             html_length=html_length,
+            frame=frame,
         )
 
     @staticmethod

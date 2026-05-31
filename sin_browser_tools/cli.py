@@ -1,7 +1,6 @@
 import asyncio
 import sys
 import json
-from .core import manager
 from .opensin_skill import skill
 
 class SINBrowserCLI:
