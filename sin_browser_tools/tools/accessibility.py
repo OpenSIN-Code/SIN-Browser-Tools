@@ -151,7 +151,7 @@ async def _build_axtree(pierce: bool) -> dict:
         for node in nodes:
             _emit_node(node, frame, lines)
 
-    ref_count = manager.registry.counter
+    ref_count = len(manager.registry)
     hints = _build_hints(
         pierce=pierce,
         ref_count=ref_count,
