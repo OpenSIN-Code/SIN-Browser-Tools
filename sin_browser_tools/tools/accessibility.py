@@ -1,5 +1,13 @@
 from sin_browser_tools.core import manager
 
+# Roles that are interactive/clickable and must stay in the snapshot even when
+# they have no accessible name (e.g. icon-only buttons common on GMX/web.de).
+_INTERACTIVE_ROLES = {
+    "button", "link", "textbox", "checkbox", "radio", "switch", "tab",
+    "menuitem", "menuitemcheckbox", "menuitemradio", "combobox", "listbox",
+    "option", "searchbox", "slider", "spinbutton", "treeitem",
+}
+
 
 async def _build_axtree(pierce: bool) -> dict:
     """Shared CDP accessibility-tree builder.
@@ -32,13 +40,17 @@ async def _build_axtree(pierce: bool) -> dict:
             if isinstance(val, str):
                 val = val.strip()
 
-            # Skip empty structural containers to keep the tree readable.
-            if not name and not val and not desc:
+            is_interactive = role in _INTERACTIVE_ROLES
+            # Skip empty structural containers, but ALWAYS keep interactive
+            # controls so icon-only buttons remain clickable.
+            if not name and not val and not desc and not is_interactive:
                 continue
 
             ref_str = ""
             backend_node_id = node.get("backendDOMNodeId")
-            if backend_node_id is not None:
+            # Register every node that has a name OR is interactive, so agents
+            # can target unlabeled controls too.
+            if backend_node_id is not None and (name or val or desc or is_interactive):
                 ref_id = manager.registry.register(
                     {
                         "backendDOMNodeId": backend_node_id,
@@ -49,7 +61,8 @@ async def _build_axtree(pierce: bool) -> dict:
                 ref_str = f" [{ref_id}]"
 
             text = " ".join(part for part in (name, desc, str(val)) if part).strip()
-            lines.append(f'- {role} "{text}"{ref_str}')
+            label = text if text else "(unlabeled)"
+            lines.append(f'- {role} "{label}"{ref_str}')
     finally:
         try:
             await cdp.detach()

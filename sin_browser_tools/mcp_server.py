@@ -9,58 +9,14 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
 from .core import manager
-from .tools import accessibility, dialog, extraction, interaction, navigation, vision
+from .tools import catalog
 
 logger = logging.getLogger("sin-browser-mcp")
 server = Server("sin-browser-tools")
 
-# Modules whose ``browser_*`` coroutines are exposed as MCP tools.
-_TOOL_MODULES = [navigation, interaction, accessibility, vision, extraction, dialog]
-
-_PY_TO_JSON = {
-    str: "string",
-    int: "integer",
-    float: "number",
-    bool: "boolean",
-    dict: "object",
-    list: "array",
-}
-
-
-def _json_type(annotation) -> str:
-    return _PY_TO_JSON.get(annotation, "string")
-
-
-def _build_input_schema(fn) -> dict:
-    """Generate a JSON schema for a tool from its function signature."""
-    sig = inspect.signature(fn)
-    properties = {}
-    required = []
-    for pname, param in sig.parameters.items():
-        annotation = param.annotation if param.annotation is not inspect.Parameter.empty else str
-        properties[pname] = {"type": _json_type(annotation)}
-        if param.default is inspect.Parameter.empty:
-            required.append(pname)
-    return {"type": "object", "properties": properties, "required": required}
-
-
-def _discover_tools() -> dict:
-    """Map MCP tool names (``browser/<action>``) -> coroutine functions.
-
-    Every public ``browser_*`` coroutine across the tool modules is exposed,
-    so the tool surface stays in sync with the implementation automatically.
-    """
-    tools = {}
-    for module in _TOOL_MODULES:
-        for name, fn in inspect.getmembers(module, inspect.iscoroutinefunction):
-            if not name.startswith("browser_"):
-                continue
-            mcp_name = "browser/" + name[len("browser_"):]
-            tools[mcp_name] = fn
-    return tools
-
-
-_TOOLS = _discover_tools()
+# Single source of truth: the catalog discovers every browser_* coroutine
+# across all tool modules, so the MCP surface never drifts from the code.
+_TOOLS = catalog.discover()
 
 
 @server.list_tools()
@@ -72,7 +28,7 @@ async def handle_list_tools() -> list[types.Tool]:
             types.Tool(
                 name=mcp_name,
                 description=description,
-                inputSchema=_build_input_schema(fn),
+                inputSchema=catalog.input_schema(fn),
             )
         )
     return listed
@@ -87,10 +43,24 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
 
         fn = _TOOLS.get(name)
         if fn is None:
-            return [types.TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
+            # Never fail silently: tell the agent exactly what is available.
+            available = sorted(_TOOLS.keys())
+            return [types.TextContent(type="text", text=json.dumps({
+                "error": f"Unknown tool: {name}",
+                "hint": "Call browser/list_tools to see all available tools.",
+                "available": available,
+            }))]
 
         result = await fn(**arguments)
         return [types.TextContent(type="text", text=json.dumps(result, default=str))]
+    except TypeError as e:
+        # Almost always a bad/missing argument -> return the expected schema.
+        fn = _TOOLS.get(name)
+        schema = catalog.input_schema(fn) if fn else None
+        return [types.TextContent(type="text", text=json.dumps({
+            "error": f"Invalid arguments for {name}: {e}",
+            "expected_schema": schema,
+        }))]
     except Exception as e:
         logger.exception("Tool %s failed", name)
         return [types.TextContent(type="text", text=json.dumps({"error": str(e), "tool": name}))]

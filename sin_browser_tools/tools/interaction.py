@@ -17,24 +17,54 @@ async def _resolve_target(target: str):
     if target.startswith("@e"):
         resolved = manager.registry.get(target)
         if resolved is None:
-            raise ValueError(f"Ref-ID {target} not found")
+            raise ValueError(
+                f"Ref-ID {target} not found. Refs expire on navigation/reload -- "
+                f"call browser_snapshot (or browser_snapshot_full_oopif) again to "
+                f"get fresh refs before interacting."
+            )
         return resolved
     return target
 
 
 async def _cdp_center(backend_node_id: int):
-    """Return the on-screen center (x, y) of a node via CDP getContentQuads."""
+    """Return the on-screen center (x, y) of a node via CDP.
+
+    Scrolls the node into view first (off-screen elements have no content
+    quads), then tries ``DOM.getContentQuads`` and falls back to
+    ``DOM.getBoxModel`` so a momentarily-empty quad result never causes a
+    silent click failure.
+    """
     cdp = await manager.context.new_cdp_session(manager.page)
     try:
+        # Bring the element into the viewport so it has renderable geometry.
+        try:
+            await cdp.send(
+                "DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend_node_id}
+            )
+        except Exception:
+            pass  # best-effort; some nodes (e.g. <option>) don't support it
+
         quads_result = await cdp.send(
             "DOM.getContentQuads", {"backendNodeId": backend_node_id}
         )
         quads = quads_result.get("quads", [])
-        if not quads or not quads[0]:
-            raise ValueError("No coordinates found for element")
-        q = quads[0]
-        # quad = [x1,y1, x2,y2, x3,y3, x4,y4]; center = midpoint of opposite corners
-        return (q[0] + q[4]) / 2, (q[1] + q[5]) / 2
+        if quads and quads[0]:
+            q = quads[0]
+            # quad = [x1,y1, x2,y2, x3,y3, x4,y4]; center = midpoint of opposite corners
+            return (q[0] + q[4]) / 2, (q[1] + q[5]) / 2
+
+        # Fallback: derive a center from the box model.
+        box = await cdp.send("DOM.getBoxModel", {"backendNodeId": backend_node_id})
+        content = (box.get("model") or {}).get("content")
+        if content and len(content) >= 8:
+            xs = content[0::2]
+            ys = content[1::2]
+            return sum(xs) / len(xs), sum(ys) / len(ys)
+
+        raise ValueError(
+            "Element has no on-screen geometry (it may be hidden, "
+            "display:none, or zero-sized). Re-snapshot or use a selector."
+        )
     finally:
         try:
             await cdp.detach()
