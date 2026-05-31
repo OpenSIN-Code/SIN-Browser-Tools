@@ -7,11 +7,24 @@ def _is_cdp_descriptor(value) -> bool:
     return isinstance(value, dict) and "backendDOMNodeId" in value
 
 
+def _descriptor_frame(descriptor: dict):
+    """Return the Playwright Frame a CDP descriptor belongs to.
+
+    Snapshots register the owning frame so that target-local backendDOMNodeIds
+    and OOPIF input routing resolve against the correct renderer target. Older
+    refs without a frame fall back to the page's main frame.
+    """
+    frame = descriptor.get("frame")
+    if frame is not None:
+        return frame
+    return manager.page.main_frame
+
+
 async def _resolve_target(target: str):
     """Resolve a target string to a Playwright handle/selector or CDP descriptor.
 
     - ``@eN`` -> looks up the registry. May return a Playwright ElementHandle
-      or a CDP descriptor dict (``{"backendDOMNodeId": ...}``).
+      or a CDP descriptor dict (``{"backendDOMNodeId": ..., "frame": ...}``).
     - any other string -> treated as a CSS/text selector.
     """
     if target.startswith("@e"):
@@ -26,17 +39,49 @@ async def _resolve_target(target: str):
     return target
 
 
-async def _cdp_center(backend_node_id: int):
-    """Return the on-screen center (x, y) of a node via CDP.
+async def _playwright_click_descriptor(descriptor: dict, click_count: int = 1,
+                                       button: str = "left") -> bool:
+    """Try to click a descriptor via Playwright's role-based locator on its
+    owning frame. Returns True on success, False if no confident match.
+
+    This is the preferred path for OOPIFs because Playwright routes input into
+    the correct cross-origin renderer internally -- no manual coordinate /
+    offset math, which is what makes raw page-level CDP clicks miss OOPIFs.
+    """
+    role = descriptor.get("role")
+    name = descriptor.get("name")
+    if not role or not name:
+        return False  # can't build a reliable accessible locator
+
+    frame = _descriptor_frame(descriptor)
+    try:
+        locator = frame.get_by_role(role, name=name, exact=True).first
+        if await locator.count() == 0:
+            locator = frame.get_by_role(role, name=name).first
+            if await locator.count() == 0:
+                return False
+        if click_count == 2:
+            await locator.dblclick(timeout=5000)
+        else:
+            await locator.click(button=button, click_count=click_count, timeout=5000)
+        return True
+    except Exception:
+        return False
+
+
+async def _cdp_center(descriptor: dict):
+    """Return the on-screen center (x, y) of a node via CDP, resolved on the
+    node's OWNING FRAME session.
 
     Scrolls the node into view first (off-screen elements have no content
     quads), then tries ``DOM.getContentQuads`` and falls back to
-    ``DOM.getBoxModel`` so a momentarily-empty quad result never causes a
-    silent click failure.
+    ``DOM.getBoxModel``. Coordinates returned for an OOPIF target are already in
+    top-level viewport space, so they can be fed to top-level input.
     """
-    cdp = await manager.context.new_cdp_session(manager.page)
+    backend_node_id = descriptor["backendDOMNodeId"]
+    frame = _descriptor_frame(descriptor)
+    cdp = await manager.context.new_cdp_session(frame)
     try:
-        # Bring the element into the viewport so it has renderable geometry.
         try:
             await cdp.send(
                 "DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend_node_id}
@@ -53,7 +98,6 @@ async def _cdp_center(backend_node_id: int):
             # quad = [x1,y1, x2,y2, x3,y3, x4,y4]; center = midpoint of opposite corners
             return (q[0] + q[4]) / 2, (q[1] + q[5]) / 2
 
-        # Fallback: derive a center from the box model.
         box = await cdp.send("DOM.getBoxModel", {"backendNodeId": backend_node_id})
         content = (box.get("model") or {}).get("content")
         if content and len(content) >= 8:
@@ -73,7 +117,12 @@ async def _cdp_center(backend_node_id: int):
 
 
 async def _cdp_mouse(x: float, y: float, button: str = "left", click_count: int = 1):
-    """Dispatch a native press/release mouse click at (x, y) via CDP."""
+    """Dispatch a native press/release mouse click at (x, y) via top-level CDP.
+
+    Input is dispatched on the PAGE session: top-level mouse events hit-test
+    down into OOPIFs automatically, and OOPIF-derived quads are already in
+    top-level coordinates, so this lands inside the cross-origin frame.
+    """
     cdp = await manager.context.new_cdp_session(manager.page)
     try:
         await cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
@@ -96,9 +145,9 @@ async def _cdp_mouse(x: float, y: float, button: str = "left", click_count: int 
 async def browser_click(target: str) -> dict:
     """Click an element.
 
-    Automatically routes CDP-backed refs (from ``browser_snapshot_full_oopif``)
-    through the coordinate-based CDP click, which works across cross-origin
-    iframes. Otherwise uses the high-level Playwright click.
+    Automatically routes CDP-backed refs (from ``browser_snapshot`` /
+    ``browser_snapshot_full_oopif``) through the OOPIF-safe click path.
+    Otherwise uses the high-level Playwright click.
     """
     resolved = await _resolve_target(target)
 
@@ -113,18 +162,19 @@ async def browser_click(target: str) -> dict:
 
 
 async def browser_click_cdp(target: str) -> dict:
-    """Click an element via CDP ``Input.dispatchMouseEvent``.
+    """Click a CDP-backed ref using a two-strategy approach with fallback.
 
-    Resolves the element's on-screen coordinates with ``DOM.getContentQuads``
-    and fires native mouse events, bypassing cross-origin iframe / OOPIF click
-    restrictions that cause Playwright's ``element.click()`` to time out.
+    Strategy 1 (preferred): Playwright role-locator on the ref's owning frame.
+      Playwright natively routes input into cross-origin OOPIF renderers, so
+      this is the most reliable path for GMX/web.de-style mail lists.
+    Strategy 2 (fallback): resolve on-screen coordinates via the frame's own CDP
+      session and dispatch a native top-level ``Input.dispatchMouseEvent``.
 
     Falls back to the standard Playwright click when the target is not a
     CDP-backed ref.
     """
     resolved = await _resolve_target(target)
     if not _is_cdp_descriptor(resolved):
-        # Not a CDP ref -> fall back to the high-level click path.
         if hasattr(resolved, "click"):
             await resolved.click(timeout=5000)
             return {"status": "clicked", "target": target}
@@ -133,7 +183,12 @@ async def browser_click_cdp(target: str) -> dict:
             return {"status": "clicked", "target": target}
         raise ValueError(f"Target {target} is not clickable via CDP")
 
-    cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+    # Strategy 1: accessible role-locator on the owning frame.
+    if await _playwright_click_descriptor(resolved):
+        return {"status": "clicked_locator", "target": target}
+
+    # Strategy 2: native coordinate click on the owning frame's geometry.
+    cx, cy = await _cdp_center(resolved)
     await _cdp_mouse(cx, cy)
     return {"status": "clicked_cdp", "target": target, "coords": [cx, cy]}
 
@@ -142,7 +197,9 @@ async def browser_double_click(target: str) -> dict:
     """Double-click an element (works for both Playwright and CDP refs)."""
     resolved = await _resolve_target(target)
     if _is_cdp_descriptor(resolved):
-        cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+        if await _playwright_click_descriptor(resolved, click_count=2):
+            return {"status": "double_clicked_locator", "target": target}
+        cx, cy = await _cdp_center(resolved)
         await _cdp_mouse(cx, cy, click_count=2)
         return {"status": "double_clicked_cdp", "target": target, "coords": [cx, cy]}
     if hasattr(resolved, "dblclick"):
@@ -156,7 +213,9 @@ async def browser_right_click(target: str) -> dict:
     """Right-click (context menu) an element."""
     resolved = await _resolve_target(target)
     if _is_cdp_descriptor(resolved):
-        cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+        if await _playwright_click_descriptor(resolved, button="right"):
+            return {"status": "right_clicked_locator", "target": target}
+        cx, cy = await _cdp_center(resolved)
         await _cdp_mouse(cx, cy, button="right")
         return {"status": "right_clicked_cdp", "target": target, "coords": [cx, cy]}
     if hasattr(resolved, "click"):
@@ -170,7 +229,21 @@ async def browser_hover(target: str) -> dict:
     """Hover the mouse over an element (reveals menus / tooltips)."""
     resolved = await _resolve_target(target)
     if _is_cdp_descriptor(resolved):
-        cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+        # Prefer Playwright's frame-aware hover (routes into OOPIFs correctly).
+        role = resolved.get("role")
+        name = resolved.get("name")
+        frame = _descriptor_frame(resolved)
+        if role and name:
+            try:
+                locator = frame.get_by_role(role, name=name, exact=True).first
+                if await locator.count() == 0:
+                    locator = frame.get_by_role(role, name=name).first
+                if await locator.count() > 0:
+                    await locator.hover(timeout=5000)
+                    return {"status": "hovered_locator", "target": target}
+            except Exception:
+                pass
+        cx, cy = await _cdp_center(resolved)
         cdp = await manager.context.new_cdp_session(manager.page)
         try:
             await cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": cx, "y": cy})
@@ -194,8 +267,8 @@ async def browser_drag(source: str, target: str) -> dict:
 
     # CDP-backed refs: do a manual press-move-release using coordinates.
     if _is_cdp_descriptor(src) or _is_cdp_descriptor(dst):
-        sx, sy = await _cdp_center(src["backendDOMNodeId"]) if _is_cdp_descriptor(src) else (None, None)
-        tx, ty = await _cdp_center(dst["backendDOMNodeId"]) if _is_cdp_descriptor(dst) else (None, None)
+        sx, sy = await _cdp_center(src) if _is_cdp_descriptor(src) else (None, None)
+        tx, ty = await _cdp_center(dst) if _is_cdp_descriptor(dst) else (None, None)
         if None in (sx, sy, tx, ty):
             raise ValueError("Drag with mixed CDP/handle targets is not supported")
         cdp = await manager.context.new_cdp_session(manager.page)
@@ -268,12 +341,14 @@ async def browser_type(target: str, text: str, clear: bool = True) -> dict:
     resolved = await _resolve_target(target)
 
     if _is_cdp_descriptor(resolved):
-        # Focus the CDP node, optionally clear it, then type via CDP key events.
+        # Focus the CDP node (frame-aware click), optionally clear, then type.
+        # Keyboard input is delivered to the focused element, including OOPIFs.
         await browser_click_cdp(target)
+        keyboard = manager.page.keyboard
         if clear:
-            await manager.page.keyboard.press("Control+A")
-            await manager.page.keyboard.press("Delete")
-        await manager.page.keyboard.type(text, delay=30)
+            await keyboard.press("Control+A")
+            await keyboard.press("Delete")
+        await keyboard.type(text, delay=30)
         return {"status": "typed", "target": target, "text": text}
 
     if clear and hasattr(resolved, "fill"):
