@@ -22,6 +22,7 @@ class RedactionStats:
     phones: int = 0
     credit_cards: int = 0
     session_ids: int = 0
+    ibans: int = 0
     custom: int = 0
     total: int = 0
 
@@ -89,7 +90,12 @@ class PIIRedactor:
 
         result = self._redact_recursive(data, stats)
         stats.total = (
-            stats.emails + stats.phones + stats.credit_cards + stats.session_ids + stats.custom
+            stats.emails
+            + stats.phones
+            + stats.credit_cards
+            + stats.session_ids
+            + stats.ibans
+            + stats.custom
         )
 
         if stats.total > 0:
@@ -151,6 +157,7 @@ class PIIRedactor:
 
         iban_matches = self.patterns["iban"].findall(text)
         if iban_matches:
+            stats.ibans += len(iban_matches)
             text = self.patterns["iban"].sub("[IBAN_REDACTED]", text)
 
         if self.aggressive:

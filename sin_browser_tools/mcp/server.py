@@ -5,7 +5,6 @@ Ersetzt den alten 46-Tool-Flat-Server durch High-Level Enterprise-Tools.
 
 import asyncio
 import json
-from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
