@@ -3,7 +3,6 @@ Integration Tests fuer SIN-Browser-Tools v2.0.
 Verifiziert die 5 Core-Fixes aus der GMX-Fehleranalyse.
 """
 
-import asyncio
 import pytest
 
 from sin_browser_tools.core.manager import BrowserManager, _RegistryStub

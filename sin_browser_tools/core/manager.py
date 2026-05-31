@@ -6,6 +6,7 @@ und Enterprise-Features (Session Vault, Observability).
 import asyncio
 import os
 import signal
+import weakref
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -53,6 +54,25 @@ class BrowserManager:
         self._browser_pid: Optional[int] = None
         self._lock = asyncio.Lock()
         self._started = False
+
+        # --- Native-Dialog-Erfassung (alert/confirm/prompt) ------------------
+        # BUGFIX: Die Dialog-Infrastruktur existierte bisher nur in der alten
+        # core.py (SINBrowserManager). Die neuen tools/dialog.py riefen aber
+        # manager.get_next_dialog() auf dem v2-BrowserManager auf -> der hatte
+        # die Methode gar nicht, also schlugen browser_dialog /
+        # browser_wait_for_dialog IMMER mit AttributeError fehl. Hier portiert.
+        self._dialog_queue: asyncio.Queue = asyncio.Queue()
+        # Der gerade anstehende Dialog. Getrennt von der Queue gehalten, damit
+        # browser_wait_for_dialog PEEKEN kann, ohne ihn zu konsumieren -- sonst
+        # faende ein folgendes browser_dialog("accept") eine leere Queue und der
+        # native Dialog wuerde die Seite dauerhaft blockieren.
+        self._pending_dialog: Optional[dict] = None
+        # Pages, an denen bereits ein Dialog-Listener haengt. WeakSet auf den
+        # Page-Objekten selbst (NICHT id(page)) -- CPython recycelt die id einer
+        # geschlossenen Page fuer eine neue, was _setup_dialog_handler sonst dazu
+        # braechte, den Listener fuer einen echten neuen Tab faelschlich zu
+        # ueberspringen und alle dessen Dialoge stillschweigend zu verlieren.
+        self._dialog_pages: "weakref.WeakSet[Page]" = weakref.WeakSet()
 
         self._install_signal_handlers()
 
@@ -130,6 +150,7 @@ class BrowserManager:
             if self.stealth:
                 await self._apply_stealth(self._page)
 
+            self._setup_dialog_handler()
             self._browser_pid = self._resolve_browser_pid()
 
             self._started = True
@@ -242,6 +263,11 @@ class BrowserManager:
             self._playwright = None
             self._page = None
             self._browser_pid = None
+            # Dialog-State zuruecksetzen: eine frische Queue (alte Eintraege
+            # zeigen auf geschlossene Pages) und keine haengenden Listener-Refs.
+            self._dialog_queue = asyncio.Queue()
+            self._pending_dialog = None
+            self._dialog_pages = weakref.WeakSet()
 
             if errors:
                 logger.warning("Cleanup completed with errors", errors=errors)
@@ -338,6 +364,7 @@ class BrowserManager:
                 self._context = await self._browser.new_context()
                 self._page = await self._context.new_page()
 
+            self._setup_dialog_handler()
             self._started = True
             logger.info(
                 "BrowserManager connected via CDP",
@@ -366,6 +393,62 @@ class BrowserManager:
         reg = self.__dict__.get("_registry_stub")
         if reg is not None:
             reg.clear()
+        # Neuer aktiver Tab -> Dialog-Listener anhaengen (idempotent durch die
+        # WeakSet-Wache), damit Dialoge des gewechselten Tabs erfasst werden.
+        self._setup_dialog_handler()
+
+    def _setup_dialog_handler(self) -> None:
+        """Haengt GENAU EINEN Dialog-Listener pro Page an.
+
+        Ohne diese Wache wuerde jeder set_active_page()-Aufruf (Tab oeffnen/
+        wechseln/schliessen) einen weiteren Listener an dieselbe Page haengen,
+        und ein einzelner alert/confirm wuerde mehrfach in die Queue gelegt --
+        was die Dialog-Queue korrumpiert.
+        """
+        page = self._page
+        if page is None or page in self._dialog_pages:
+            return
+
+        async def _handle_dialog(dialog):
+            await self._dialog_queue.put(
+                {
+                    "type": dialog.type,
+                    "message": dialog.message,
+                    "default_value": dialog.default_value,
+                    "dialog": dialog,
+                }
+            )
+
+        page.on("dialog", _handle_dialog)
+        self._dialog_pages.add(page)
+
+    async def get_next_dialog(
+        self, timeout: float = 5.0, consume: bool = True
+    ) -> Optional[dict]:
+        """Gibt den naechsten anstehenden nativen Dialog zurueck.
+
+        - ``consume=True`` (Default, von ``browser_dialog``): Dialog an den
+          Aufrufer geben und freigeben, damit er genau einmal akzeptiert/
+          verworfen werden kann.
+        - ``consume=False`` (von ``browser_wait_for_dialog``): nur PEEKEN. Der
+          Dialog bleibt anstehend, sodass ein folgendes ``browser_dialog``
+          denselben Dialog bearbeiten kann statt eine leere Queue zu sehen.
+
+        Ein bereits gepeekter Dialog wird in ``_pending_dialog`` gehalten, damit
+        wiederholte Wait/Act-Aufrufe stets auf dasselbe Dialog-Objekt zeigen.
+        """
+        if self._pending_dialog is None:
+            try:
+                self._pending_dialog = await asyncio.wait_for(
+                    self._dialog_queue.get(), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                return None
+
+        dialog_info = self._pending_dialog
+        if consume:
+            self._pending_dialog = None
+        return dialog_info
 
     def clear_active_page(self) -> None:
         """Setzt die aktive Page auf None (z.B. nachdem der letzte Tab zuging).
