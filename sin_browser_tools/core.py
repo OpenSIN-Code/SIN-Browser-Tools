@@ -9,9 +9,15 @@ logger = logging.getLogger(__name__)
 
 class ElementRegistry:
     """Maps stable ref-ids (@e1, @e2, ...) to either a Playwright ElementHandle
-    (high-level API) or a CDP descriptor dict containing a ``backendDOMNodeId``
-    (low-level API, required for OOPIF / Shadow-DOM elements that Playwright
-    cannot resolve)."""
+    (high-level API) or a CDP descriptor dict (low-level API, required for
+    OOPIF / Shadow-DOM elements that Playwright cannot resolve via selectors).
+
+    CDP descriptors carry:
+      - ``backendDOMNodeId``: the node id, valid ONLY on its owning target.
+      - ``role`` / ``name``: used to rebuild an accessible Playwright locator.
+      - ``frame``: the Playwright Frame the node lives in. Required because
+        backendDOMNodeIds are target-local and OOPIF input must be routed
+        through the owning frame's CDP session / locator."""
 
     def __init__(self):
         self.elements: Dict[str, Any] = {}
