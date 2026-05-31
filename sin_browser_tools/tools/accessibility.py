@@ -43,9 +43,15 @@ async def _collect_frame_axnodes(frame, pierce: bool) -> list:
             pass
 
 
+# Low-signal leaf roles that duplicate their parent's text. Emitting them as
+# their own lines (and especially registering refs for them) just inflates the
+# token cost and pollutes ref_count with non-actionable entries.
+_NOISE_ROLES = {"InlineTextBox", "LineBreak"}
+
+
 def _emit_node(node, frame, lines: list) -> None:
-    """Process one CDP AX node: register it (with its owning frame) and append
-    a human-readable line to ``lines``."""
+    """Process one CDP AX node: register interactive nodes (with their owning
+    frame) and append a human-readable line to ``lines``."""
     if node.get("ignored"):
         return
 
@@ -56,6 +62,11 @@ def _emit_node(node, frame, lines: list) -> None:
     if isinstance(val, str):
         val = val.strip()
 
+    # Drop pure text fragments (InlineTextBox/LineBreak): their content is
+    # already covered by the parent StaticText/heading line.
+    if role in _NOISE_ROLES:
+        return
+
     is_interactive = role in _INTERACTIVE_ROLES
     # Skip empty structural containers, but ALWAYS keep interactive controls so
     # icon-only buttons remain clickable.
@@ -64,7 +75,10 @@ def _emit_node(node, frame, lines: list) -> None:
 
     ref_str = ""
     backend_node_id = node.get("backendDOMNodeId")
-    if backend_node_id is not None and (name or val or desc or is_interactive):
+    # Only INTERACTIVE nodes get an @eN ref. Previously every named node
+    # (StaticText, headings, ...) was registered, so ref_count lied about how
+    # many things were actually clickable and agents wasted clicks on plain text.
+    if backend_node_id is not None and is_interactive:
         # Store the OWNING FRAME alongside the backendDOMNodeId. backendDOMNodeIds
         # are target-local, so a later click must resolve / dispatch on the same
         # frame's CDP session -- not the page's.

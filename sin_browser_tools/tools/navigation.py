@@ -1,23 +1,35 @@
 from sin_browser_tools.core import manager
 
 
+def _invalidate_refs() -> None:
+    """Drop all @eN refs. They point at the PREVIOUS document and become stale
+    the moment we navigate -- clicking one afterwards would target a detached or
+    wrong node. Callers must browser_snapshot again to get fresh refs.
+    """
+    manager.registry.clear()
+
+
 async def browser_navigate(url: str) -> dict:
     response = await manager.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    _invalidate_refs()
     return {"status": response.status if response else "unknown", "url": manager.page.url}
 
 
 async def browser_back() -> dict:
     await manager.page.go_back(wait_until="domcontentloaded")
+    _invalidate_refs()
     return {"status": "navigated_back", "url": manager.page.url}
 
 
 async def browser_forward() -> dict:
     await manager.page.go_forward(wait_until="domcontentloaded")
+    _invalidate_refs()
     return {"status": "navigated_forward", "url": manager.page.url}
 
 
 async def browser_reload() -> dict:
     await manager.page.reload(wait_until="domcontentloaded")
+    _invalidate_refs()
     return {"status": "reloaded", "url": manager.page.url}
 
 

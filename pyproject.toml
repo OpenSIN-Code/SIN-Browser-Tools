@@ -7,13 +7,13 @@ packages = ["sin_browser_tools"]
 
 [project]
 name = "sin-browser-tools-library"
-version = "0.1.0"
-description = "Native browser automation library with Ref-ID system, CDP support, and OpenSIN integration."
+version = "2.0.0"
+description = "Enterprise-grade AI browser automation with OOPIF, Shadow DOM, Session Vault, and PII Redaction."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "OpenSIN", email = "dev@opensincodebase.com"}]
 license = {text = "MIT"}
-keywords = ["browser", "automation", "hermes", "CDP", "playwright", "MCP", "opensin"]
+keywords = ["browser", "automation", "CDP", "playwright", "MCP", "opensin", "enterprise", "oopif", "shadow-dom"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
@@ -26,14 +26,29 @@ dependencies = [
     "websockets>=12.0",
     "mcp>=1.2.0",
     "pydantic>=2.0.0",
+    "structlog>=23.2.0",
+    "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "black>=23.0", "ruff>=0.1.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
 
 [project.scripts]
-sin-browser-mcp = "sin_browser_tools.mcp_server:main"
+# v2.0 entrypoint (neue Architektur)
+sin-browser-mcp = "sin_browser_tools.mcp.server:main"
+# Legacy entrypoints (rueckwaertskompatibel)
+sin-browser-mcp-legacy = "sin_browser_tools.mcp_server:main"
 sin-browser = "sin_browser_tools.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [project.urls]
 Homepage = "https://github.com/OpenSIN-Code/SIN-Browser-Tools"
