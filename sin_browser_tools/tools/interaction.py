@@ -478,7 +478,7 @@ async def browser_click_by_text(
     except Exception as e:
         raise ValueError(
             f"Live locator matched {keyword!r} but click failed: {str(e)}"
-        )
+        ) from e
 
 
 async def browser_upload_file(target: str, file_path: str) -> dict:
