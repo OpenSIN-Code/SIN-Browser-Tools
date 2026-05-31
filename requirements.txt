@@ -1,0 +1,16 @@
+# Runtime dependencies for SIN-Browser-Tools.
+#
+# This file is a convenience mirror of the [project].dependencies in
+# pyproject.toml. The canonical source is pyproject.toml — prefer:
+#
+#     pip install -e .
+#
+# If you use this file instead (pip install -r requirements.txt), you STILL
+# need the Chromium browser binary, which is NOT a pip package:
+#
+#     python -m playwright install chromium
+#
+playwright>=1.40.0
+websockets>=12.0
+mcp>=1.2.0
+pydantic>=2.0.0

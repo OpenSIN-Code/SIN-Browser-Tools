@@ -22,6 +22,21 @@ every click; old refs (@e3 from a previous snapshot) are **stale and invalid**.
 
 ---
 
+## 0.5 Before the loop: is the browser installed?
+
+This library drives a real Chromium browser. It must be installed once. If your
+very first tool call fails with *"Executable doesn't exist"* or *"run `playwright
+install`"*, the browser binary is missing. Fix it with this shell command (run
+ONCE, not per action):
+
+```bash
+python -m playwright install chromium
+```
+
+This is a one-time machine setup step, not something you do inside the loop.
+
+---
+
 ## 1. Golden rules (break these and you will fail)
 
 1. **Always snapshot before you act.** No exceptions.
@@ -77,7 +92,8 @@ When unsure, call `browser_list_tools("keyword")` to search by name.
 
 | Symptom                                            | What it means                          | Do this                                                            |
 |----------------------------------------------------|----------------------------------------|--------------------------------------------------------------------|
-| Click "succeeds" but nothing changes               | Element is inside an OOPIF / overlay   | Retry with `browser_click_cdp("@eN")`                              |
+ | `Executable doesn't exist` / `run playwright install`| Chromium browser not installed       | Run once in the shell: `python -m playwright install chromium`     |
+ | Click "succeeds" but nothing changes               | Element is inside an OOPIF / overlay   | Retry with `browser_click_cdp("@eN")`                              |
 | `ref @eN not found` / `unknown ref`                | You used a stale ref                   | Call `browser_snapshot` again, use a FRESH ref                     |
 | Snapshot is missing the email list / iframe content| Content lives in a cross-origin iframe | Use `browser_snapshot_full_oopif()` instead of `browser_snapshot`  |
 | Element "not visible" / "not stable"               | Page still loading or element off-screen| `browser_wait_for_load`, then `browser_scroll`, then re-snapshot   |

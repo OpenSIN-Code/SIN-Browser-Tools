@@ -15,9 +15,23 @@ Features:
 ```bash
 git clone https://github.com/OpenSIN-Code/SIN-Browser-Tools.git
 cd SIN-Browser-Tools
+
+# 1. Python dependencies (canonical):
 pip install -e .
+#    ...or, if you prefer a plain requirements file:
+#    pip install -r requirements.txt
+
+# 2. REQUIRED: download the Chromium browser binary.
 python -m playwright install chromium
 ```
+
+> [!IMPORTANT]
+> **Step 2 is not optional.** `playwright install chromium` downloads the actual
+> browser and is **separate** from `pip install`. It is NOT a pip package, so it
+> will never be pulled in by `pip install -e .` or `requirements.txt`. If you skip
+> it, every tool fails at launch with an error like
+> *"Executable doesn't exist ... run `playwright install`"*. This is the single
+> most common setup mistake.
 
 ## Quick Start
 
