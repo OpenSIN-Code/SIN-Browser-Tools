@@ -1,7 +1,20 @@
+"""DEPRECATED legacy MCP entry point (``sin-browser-mcp-legacy``).
+
+This is the original *flat* 48-tool catalog server. It is kept only for
+backwards compatibility and still works, but new integrations should use the
+v2 server at :mod:`sin_browser_tools.mcp.server` (entry point
+``sin-browser-mcp``), which exposes the high-level Enterprise tools
+(``smart_navigate``, ``deep_snapshot``, ``smart_interact`` ...).
+
+Both servers share the same underlying ``core.manager`` and tool
+implementations, so the legacy surface is a thin compatibility shim.
+"""
+
 import asyncio
 import inspect
 import json
 import logging
+import warnings
 
 import mcp.types as types
 from mcp.server import Server
@@ -83,6 +96,13 @@ async def _run():
 
 
 def main():
+    # Backwards compatible, but steer integrators toward the v2 server.
+    message = (
+        "sin-browser-mcp-legacy (sin_browser_tools.mcp_server) is deprecated. "
+        "Use 'sin-browser-mcp' (sin_browser_tools.mcp.server) instead."
+    )
+    warnings.warn(message, DeprecationWarning, stacklevel=2)
+    logger.warning(message)
     asyncio.run(_run())
 
 

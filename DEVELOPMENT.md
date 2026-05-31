@@ -36,12 +36,15 @@ await manager.start_local(headless=False)
 
 ```
 sin_browser_tools/
-├── core.py              # SINBrowserManager, ElementRegistry
-├── mcp_server.py        # MCP Protocol Server
+├── core/                # BrowserManager, ElementRegistry, frame traversal, …
+│   ├── manager.py       #   browser lifecycle + dialog handling + ref registry
+│   └── frame_traversal.py
+├── mcp/server.py        # MCP Protocol Server (v2, preferred) → sin-browser-mcp
+├── mcp_server.py        # DEPRECATED legacy flat server → sin-browser-mcp-legacy
 ├── cli.py               # CLI interface
 ├── opensin_skill.py     # Tool registry
 ├── opensin_config.py    # Configuration
-└── tools/               # 6 tool modules
+└── tools/               # tool modules (navigation, interaction, …)
 ```
 
 ## Common Tasks
