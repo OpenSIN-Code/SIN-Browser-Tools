@@ -4,10 +4,12 @@ SIN-Browser-Tools is a native browser automation library with three integration 
 
 ## Core Components
 
-**SINBrowserManager** - Main orchestrator
+**BrowserManager** (`core/manager.py`) - Main orchestrator
 - Manages Playwright browser lifecycle
 - Supports local browsers or remote CDP connections
 - Handles dialog events asynchronously
+- Exposed to tools as the module-level `manager` singleton (a proxy in
+  `core/manager.py`)
 
 **ElementRegistry** - Ref-ID mapping system
 - Maps @e1, @e2, etc. to Playwright handles or CDP descriptors

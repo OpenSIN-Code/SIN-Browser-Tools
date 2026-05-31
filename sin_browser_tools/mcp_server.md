@@ -1,5 +1,11 @@
 # `mcp_server.py`
 
+> **⚠️ DEPRECATED.** This is the legacy *flat* catalog server
+> (`sin-browser-mcp-legacy`). It still works for backwards compatibility and
+> emits a `DeprecationWarning` on start. New integrations should use the v2
+> server `sin_browser_tools.mcp.server` (entry point `sin-browser-mcp`), which
+> exposes the high-level Enterprise tools. See `mcp/server.py`.
+
 The MCP (Model Context Protocol) server entry point. Exposes every `browser_*`
 tool over stdio to MCP clients (Claude Desktop, Cursor, Cline).
 

@@ -40,9 +40,10 @@ dev = [
 ]
 
 [project.scripts]
-# v2.0 entrypoint (neue Architektur)
+# v2.0 entrypoint (neue Architektur) -- bevorzugt
 sin-browser-mcp = "sin_browser_tools.mcp.server:main"
-# Legacy entrypoints (rueckwaertskompatibel)
+# DEPRECATED: alter Flat-48-Tool-Server, nur noch rueckwaertskompatibel.
+# Emittiert beim Start eine DeprecationWarning -> auf 'sin-browser-mcp' wechseln.
 sin-browser-mcp-legacy = "sin_browser_tools.mcp_server:main"
 sin-browser = "sin_browser_tools.cli:main"
 
