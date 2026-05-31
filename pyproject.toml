@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sin-browser-tools-library"
+version = "0.1.0"
+description = "Native browser automation library with Ref-ID system, CDP support, and OpenSIN integration."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "OpenSIN", email = "dev@opensincodebase.com"}]
+license = {text = "MIT"}
+keywords = ["browser", "automation", "hermes", "CDP", "playwright", "MCP", "opensin"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "playwright>=1.40.0",
+    "websockets>=12.0",
+    "mcp>=1.2.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "black>=23.0", "ruff>=0.1.0"]
+
+[project.scripts]
+sin-browser-mcp = "sin_browser_tools.mcp_server:main"
+sin-browser = "sin_browser_tools.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/OpenSIN-Code/SIN-Browser-Tools"
+Repository = "https://github.com/OpenSIN-Code/SIN-Browser-Tools"
