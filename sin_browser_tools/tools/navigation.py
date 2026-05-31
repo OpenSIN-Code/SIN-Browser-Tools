@@ -37,6 +37,12 @@ async def browser_get_url() -> dict:
     return {"url": manager.page.url, "title": await manager.page.title()}
 
 
+async def browser_set_viewport(width: int = 1280, height: int = 720) -> dict:
+    """Resize the viewport, e.g. to test responsive layouts or mobile widths."""
+    await manager.page.set_viewport_size({"width": width, "height": height})
+    return {"status": "resized", "width": width, "height": height}
+
+
 async def browser_wait_for(selector: str, state: str = "visible", timeout: float = 10000) -> dict:
     """Wait for a selector to reach a state ('attached', 'detached', 'visible', 'hidden')."""
     try:
@@ -111,9 +117,20 @@ async def browser_switch_tab(index: int) -> dict:
 async def browser_close_tab(index: int = None) -> dict:
     """Close a tab by index (defaults to the active tab) and re-focus another."""
     pages = manager.context.pages
+    if index is not None and (index < 0 or index >= len(pages)):
+        raise ValueError(f"Tab index {index} out of range (0..{len(pages) - 1})")
     page = manager.page if index is None else pages[index]
+    was_active = page is manager.page
     await page.close()
     remaining = manager.context.pages
-    if remaining:
+    # Only move focus if we actually closed the active tab; closing a background
+    # tab must leave the user's current tab focused.
+    if was_active and remaining:
         manager.set_active_page(remaining[-1])
-    return {"status": "closed", "remaining": len(remaining)}
+    elif not remaining:
+        manager.page = None
+    return {
+        "status": "closed",
+        "remaining": len(remaining),
+        "active_url": manager.page.url if manager.page else None,
+    }

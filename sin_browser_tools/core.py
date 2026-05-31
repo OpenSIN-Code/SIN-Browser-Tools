@@ -42,6 +42,9 @@ class SINBrowserManager:
         self.page: Optional[Page] = None
         self.registry = ElementRegistry()
         self._dialog_queue: asyncio.Queue = asyncio.Queue()
+        # Pages that already have a dialog listener attached, so switching tabs
+        # never stacks duplicate handlers (which would enqueue one dialog N times).
+        self._dialog_pages: "set[int]" = set()
 
     async def start_local(self, headless: bool = True):
         self.playwright = await async_playwright().start()
@@ -62,6 +65,13 @@ class SINBrowserManager:
         self._setup_dialog_handler()
 
     def _setup_dialog_handler(self):
+        # Attach at most one dialog listener per page. Without this guard,
+        # every set_active_page() call (tab open/switch/close) would add another
+        # listener to the same page and a single alert/confirm would be enqueued
+        # multiple times, corrupting the dialog queue.
+        if self.page is None or id(self.page) in self._dialog_pages:
+            return
+
         async def handle_dialog(dialog):
             await self._dialog_queue.put({
                 "type": dialog.type,
@@ -70,6 +80,7 @@ class SINBrowserManager:
                 "dialog": dialog
             })
         self.page.on("dialog", handle_dialog)
+        self._dialog_pages.add(id(self.page))
 
     def set_active_page(self, page: Page):
         """Make ``page`` the active page and (re)attach the dialog handler.
@@ -91,6 +102,14 @@ class SINBrowserManager:
             await self.browser.close()
         if self.playwright:
             await self.playwright.stop()
+        # Reset all state so a subsequent start_local()/connect_cdp() on the same
+        # manager instance begins from a clean slate.
+        self.browser = None
+        self.context = None
+        self.page = None
+        self.playwright = None
+        self._dialog_pages.clear()
+        self.registry.clear()
 
     @staticmethod
     async def scan_cdp_ports(host: str = "localhost", ports: List[int] = None) -> Optional[str]:

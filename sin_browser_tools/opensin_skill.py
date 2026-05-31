@@ -1,6 +1,16 @@
-import json
-from dataclasses import dataclass, asdict
-from typing import Dict, Any, Optional
+"""OpenSIN skill registry.
+
+This used to be a hand-maintained list of tools, which drifted out of sync with
+the real implementation (wrong/invalid names, missing tools). It is now derived
+directly from the central :mod:`sin_browser_tools.tools.catalog`, so the skill
+registry can never disagree with the tools the MCP server actually exposes.
+"""
+
+from dataclasses import dataclass, asdict, field
+from typing import Dict, Any, List
+
+from .tools import catalog
+
 
 @dataclass
 class ToolAction:
@@ -9,38 +19,93 @@ class ToolAction:
     category: str
     params: Dict[str, Any]
     enabled: bool = True
-    tags: list = None
+    tags: List[str] = field(default_factory=list)
+
+
+# Map a tool name to its category for nicer grouping in the registry output.
+_CATEGORY_BY_PREFIX = {
+    "navigate": "navigation",
+    "back": "navigation",
+    "forward": "navigation",
+    "reload": "navigation",
+    "scroll": "navigation",
+    "press": "navigation",
+    "get_url": "navigation",
+    "set_viewport": "navigation",
+    "wait": "navigation",
+    "list_tabs": "navigation",
+    "new_tab": "navigation",
+    "switch_tab": "navigation",
+    "close_tab": "navigation",
+    "click": "interaction",
+    "double_click": "interaction",
+    "right_click": "interaction",
+    "hover": "interaction",
+    "drag": "interaction",
+    "select_option": "interaction",
+    "check": "interaction",
+    "type": "interaction",
+    "fill": "interaction",
+    "upload_file": "interaction",
+    "snapshot": "accessibility",
+    "vision": "vision",
+    "screenshot": "vision",
+    "pdf": "vision",
+    "get_images": "vision",
+    "get_text": "vision",
+    "dialog": "dialog",
+    "wait_for_dialog": "dialog",
+    "console": "extraction",
+    "cdp": "extraction",
+    "get_cookies": "extraction",
+    "set_cookie": "extraction",
+    "clear_cookies": "extraction",
+    "get_html": "extraction",
+    "get_links": "extraction",
+    "get_attribute": "extraction",
+    "storage": "extraction",
+    "list_tools": "meta",
+}
+
+
+def _category_for(tool_name: str) -> str:
+    action = tool_name[len("browser_"):] if tool_name.startswith("browser_") else tool_name
+    for prefix, cat in _CATEGORY_BY_PREFIX.items():
+        if action == prefix or action.startswith(prefix):
+            return cat
+    return "misc"
+
 
 class SINBrowserSkill:
-    TOOL_DEFINITIONS = [
-        ToolAction("browser/snapshot", "Get accessibility tree with Ref-IDs", "accessibility", {}),
-        ToolAction("browser/navigate", "Navigate to URL", "navigation", {"url": {"type": "string", "required": True}}),
-        ToolAction("browser/back", "Go back in history", "navigation", {}),
-        ToolAction("browser/scroll", "Scroll page", "navigation", {"direction": {"type": "string", "enum": ["up", "down"]}, "amount": {"type": "integer"}}),
-        ToolAction("browser/press", "Press keyboard key", "navigation", {"key": {"type": "string", "required": True}}),
-        ToolAction("browser/click", "Click element", "interaction", {"target": {"type": "string", "required": True}}),
-        ToolAction("browser/type", "Type text", "interaction", {"target": {"type": "string", "required": True}, "text": {"type": "string", "required": True}}),
-        ToolAction("browser/fill", "Fill input", "interaction", {"target": {"type": "string", "required": True}, "value": {"type": "string", "required": True}}),
-        ToolAction("browser/upload", "Upload file", "interaction", {"target": {"type": "string", "required": True}, "file_path": {"type": "string", "required": True}}),
-        ToolAction("browser/screenshot", "Take screenshot", "vision", {}),
-        ToolAction("browser/images", "List images", "vision", {}),
-        ToolAction("browser/text", "Extract text", "vision", {}),
-        ToolAction("browser/dialog", "Handle JS dialog", "dialog", {"action": {"type": "string", "enum": ["accept", "dismiss"]}}),
-        ToolAction("browser/wait-dialog", "Wait for dialog", "dialog", {}),
-        ToolAction("browser/console", "Execute JavaScript", "extraction", {"expression": {"type": "string", "required": True}}),
-        ToolAction("browser/cdp", "Send CDP command", "extraction", {"method": {"type": "string", "required": True}}),
-    ]
-    
     def __init__(self):
-        self.actions = {action.name: action for action in self.TOOL_DEFINITIONS}
-    
+        self.actions: Dict[str, ToolAction] = {}
+        for spec in catalog.specs():
+            name = spec["name"]
+            params = {
+                pname: {
+                    "type": pinfo.get("type", "string"),
+                    "required": pname in spec["required"],
+                }
+                for pname, pinfo in spec["parameters"].items()
+            }
+            self.actions[name] = ToolAction(
+                name=name,
+                description=spec["description"],
+                category=_category_for(name),
+                params=params,
+            )
+
     def to_opensin_registry(self) -> Dict[str, Any]:
         return {
             "skill": "sin-browser-tools",
             "version": "0.1.0",
-            "actions": {action.name: asdict(action) for action in self.TOOL_DEFINITIONS}
+            "count": len(self.actions),
+            "actions": {name: asdict(action) for name, action in self.actions.items()},
         }
 
+
 skill = SINBrowserSkill()
+
+
 def init_opensin_integration():
     return skill

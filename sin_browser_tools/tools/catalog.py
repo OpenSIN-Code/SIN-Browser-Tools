@@ -71,7 +71,12 @@ def input_schema(fn) -> dict:
 
 
 def discover() -> dict:
-    """Map MCP tool names (``browser/<action>``) -> coroutine functions.
+    """Map MCP tool names (``browser_<action>``) -> coroutine functions.
+
+    Tool names MUST match the MCP / Anthropic schema ``^[a-zA-Z0-9_-]{1,64}$``,
+    so we keep the underscore form (``browser_navigate``) verbatim. Using a
+    slash (``browser/navigate``) is rejected by Claude Desktop, Cursor and Cline
+    and silently disables every tool.
 
     Includes this module too, so ``browser_list_tools`` is itself discoverable.
     """
@@ -85,8 +90,8 @@ def discover() -> dict:
         for name, fn in inspect.getmembers(module, inspect.iscoroutinefunction):
             if not name.startswith("browser_"):
                 continue
-            mcp_name = "browser/" + name[len("browser_"):]
-            tools[mcp_name] = fn
+            # Keep the function name as the MCP tool name (valid, schema-safe).
+            tools[name] = fn
     return tools
 
 
