@@ -115,12 +115,18 @@ async def _build_axtree(pierce: bool) -> dict:
         if fr_origin and fr_origin != main_origin:
             frames_to_scan.append(fr)
 
+    # Total cross-origin frames present on the page (whether or not the scan of
+    # each succeeds). Used to advise the agent even when a frame fails to scan.
+    oopif_present = len(frames_to_scan) - 1
+
     oopif_count = 0
+    scan_failures = 0
     for frame in frames_to_scan:
         is_oopif = frame is not main_frame
         try:
             nodes = await _collect_frame_axnodes(frame, pierce)
         except Exception as e:  # noqa: BLE001 - surface, don't abort whole scan
+            scan_failures += 1
             lines.append(f'- (frame scan failed: {_origin(frame.url)} -- {e})')
             continue
 
@@ -131,12 +137,75 @@ async def _build_axtree(pierce: bool) -> dict:
         for node in nodes:
             _emit_node(node, frame, lines)
 
-    return {
+    ref_count = manager.registry.counter
+    hints = _build_hints(
+        pierce=pierce,
+        ref_count=ref_count,
+        oopif_present=oopif_present,
+        oopif_scanned=oopif_count,
+        scan_failures=scan_failures,
+    )
+
+    result = {
         "tree": "\n".join(lines),
-        "ref_count": manager.registry.counter,
+        "ref_count": ref_count,
         "oopif_count": oopif_count,
         "method": "cdp_multitarget_pierce" if pierce else "cdp_multitarget",
     }
+    if hints:
+        # A single, copy-paste-able instruction for weak agents, plus the raw list.
+        result["hint"] = " ".join(hints)
+        result["hints"] = hints
+    return result
+
+
+def _build_hints(
+    *,
+    pierce: bool,
+    ref_count: int,
+    oopif_present: int,
+    oopif_scanned: int,
+    scan_failures: int,
+) -> list:
+    """Turn the scan outcome into plain, imperative advice for an agent.
+
+    These strings are written to be acted on literally -- they name the exact
+    next tool to call so a weak agent does not have to reason about OOPIFs.
+    """
+    hints: list = []
+
+    # 1) The page has cross-origin iframes but this was the FAST snapshot.
+    #    The mail list / embedded app most likely lives in there.
+    if oopif_present > 0 and not pierce:
+        hints.append(
+            f"This page has {oopif_present} cross-origin iframe(s) (OOPIF). "
+            "Important content (e.g. a webmail message list) is often inside "
+            "them and may be missing here. Call browser_snapshot_full_oopif to "
+            "capture them."
+        )
+
+    # 2) Nothing actionable was found at all.
+    if ref_count == 0:
+        if oopif_present > 0 and pierce:
+            hints.append(
+                "No interactive elements were found even with OOPIF scanning. "
+                "The frame may still be loading -- wait briefly (browser_wait) "
+                "and snapshot again."
+            )
+        elif not pierce and oopif_present == 0:
+            hints.append(
+                "No interactive elements were found. The page may not be loaded "
+                "yet -- call browser_wait, then browser_snapshot again."
+            )
+
+    # 3) A frame's CDP session could not be opened.
+    if scan_failures > 0:
+        hints.append(
+            f"{scan_failures} frame(s) could not be scanned. Retry with "
+            "browser_snapshot_full_oopif, or browser_wait and snapshot again."
+        )
+
+    return hints
 
 
 async def browser_snapshot() -> dict:
@@ -146,6 +215,11 @@ async def browser_snapshot() -> dict:
     readable tree with a ``ref_count`` of registered interactive nodes. Every
     named node gets a ref-id (@e1, @e2, ...) usable with ``browser_click`` /
     ``browser_type``.
+
+    If the page looks empty or has cross-origin iframes, the result includes a
+    ``hint`` string telling you exactly which tool to call next (e.g.
+    ``browser_snapshot_full_oopif``). ALWAYS read ``hint`` if present and follow
+    it before deciding the page has no usable content.
     """
     return await _build_axtree(pierce=False)
 

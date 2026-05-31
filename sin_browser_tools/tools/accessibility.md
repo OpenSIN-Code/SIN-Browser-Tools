@@ -16,9 +16,29 @@ obtain clickable ref-ids. **This module contains the OOPIF fix.**
   "tree": "- button \"Compose\" [@e1]\n- iframe \"[OOPIF #1: https://3c.gmx.net]\"\n  ...",
   "ref_count": 42,        // number of registered interactive nodes
   "oopif_count": 1,       // cross-origin frames that were scanned separately
-  "method": "cdp_multitarget_pierce"
+  "method": "cdp_multitarget_pierce",
+  "hint": "This page has 1 cross-origin iframe(s) (OOPIF). ... Call browser_snapshot_full_oopif to capture them.",
+  "hints": ["...", "..."]  // same advice as a list; only present when relevant
 }
 ```
+
+### `hint` / `hints` (agent guidance)
+
+When the snapshot looks empty or iframe-heavy, the result carries a plain,
+imperative `hint` string (and a `hints` list) that names the **exact next tool
+to call**. This lets a weak agent recover without reasoning about OOPIFs.
+
+`_build_hints(...)` emits advice for these situations:
+
+| Situation | Hint tells the agent to… |
+| --- | --- |
+| Fast `browser_snapshot` on a page with cross-origin iframes | call `browser_snapshot_full_oopif` (content may be inside the OOPIF) |
+| `ref_count == 0` on a plain page | call `browser_wait`, then `browser_snapshot` again |
+| `ref_count == 0` even with OOPIF scanning | `browser_wait` (frame still loading), then retry |
+| One or more frames failed to scan | retry with `browser_snapshot_full_oopif` / `browser_wait` |
+
+A clean, fully-loaded page returns **no** `hint` field. Agents should always
+read `hint` if present and follow it before concluding the page is empty.
 
 ## The OOPIF problem this solves
 
