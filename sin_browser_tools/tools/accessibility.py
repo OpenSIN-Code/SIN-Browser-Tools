@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 
 from sin_browser_tools.core import manager
+from sin_browser_tools.core.frame_traversal import UnifiedFrameTraverser
 
 # Roles that are interactive/clickable and must stay in the snapshot even when
 # they have no accessible name (e.g. icon-only buttons common on GMX/web.de).
@@ -98,14 +99,16 @@ def _emit_node(node, frame, lines: list) -> None:
 
 
 async def _build_axtree(pierce: bool) -> dict:
-    """Shared CDP accessibility-tree builder with OOPIF support.
+    """Shared CDP accessibility-tree builder with complete OOPIF support.
 
     Strategy:
-      1. Scan the main frame with ``getFullAXTree(pierce=...)``. With ``pierce``
-         this already covers Shadow-DOM roots and *same-process* iframes.
-      2. Additionally scan every cross-origin frame with its own CDP session.
-         Those are OOPIFs (separate renderer target) that ``pierce`` cannot
-         reach from the page target -- this is the GMX/web.de mail-list case.
+      1. Use UnifiedFrameTraverser to collect ALL frames recursively (including
+         deeply nested frames, frames that load late, and OOPIFs). This avoids
+         the incomplete page.frames list issue (Issue #6).
+      2. For the main frame: use ``getFullAXTree(pierce=...)`` which covers
+         Shadow-DOM + same-process iframes when pierce=True.
+      3. For each OOPIF (cross-origin frame): open a dedicated CDP session
+         bound to that frame and scan its tree independently.
 
     Every named/interactive node is registered with its owning frame so
     ``browser_click`` can target it across process boundaries.
@@ -117,21 +120,29 @@ async def _build_axtree(pierce: bool) -> dict:
     main_frame = page.main_frame
     main_origin = _origin(main_frame.url)
 
-    # Build the scan list: main frame first, then each OOPIF (cross-origin) frame.
+    # Collect ALL frames recursively using UnifiedFrameTraverser (Issue #6 fix:
+    # page.frames is incomplete on complex pages like GMX with 50+ frames).
+    traverser = UnifiedFrameTraverser(pierce_shadow=pierce)
+    frame_infos = await traverser.traverse(page)
+    
+    # Build frame list: main first, then OOPIFs sorted by origin for stable output.
     frames_to_scan = [main_frame]
-    for fr in page.frames:
-        if fr is main_frame:
+    oopif_frames = []
+    
+    for finfo in frame_infos:
+        if finfo.frame is main_frame:
             continue
-        fr_origin = _origin(fr.url)
-        # A cross-origin frame is (under site isolation) an OOPIF. Same-origin
-        # subframes are already included in the main frame's pierced tree, so we
-        # skip them to avoid duplicate refs.
+        fr_origin = _origin(finfo.frame.url)
         if fr_origin and fr_origin != main_origin:
-            frames_to_scan.append(fr)
+            oopif_frames.append(finfo.frame)
+    
+    # Sort OOPIFs by origin for deterministic output
+    oopif_frames.sort(key=lambda f: _origin(f.url))
+    frames_to_scan.extend(oopif_frames)
 
     # Total cross-origin frames present on the page (whether or not the scan of
     # each succeeds). Used to advise the agent even when a frame fails to scan.
-    oopif_present = len(frames_to_scan) - 1
+    oopif_present = len(oopif_frames)
 
     oopif_count = 0
     scan_failures = 0
@@ -243,8 +254,10 @@ async def browser_snapshot_full_oopif(pierce: bool = True) -> dict:
 
     Combines ``getFullAXTree(pierce=True)`` on the main frame (Shadow-DOM +
     same-process iframes) with a dedicated per-frame CDP session for every
-    cross-origin OOPIF, so the entire accessibility tree is captured across
-    process boundaries. Nodes are registered with their owning frame so they
-    can be clicked via ``browser_click`` / ``browser_click_cdp``.
+    cross-origin OOPIF. Uses UnifiedFrameTraverser for complete frame discovery
+    (Issue #6 fix: page.frames is incomplete on complex pages), so the entire
+    accessibility tree is captured across process boundaries. Nodes are
+    registered with their owning frame so they can be clicked via
+    ``browser_click`` / ``browser_click_cdp``.
     """
     return await _build_axtree(pierce=pierce)
