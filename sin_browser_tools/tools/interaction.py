@@ -400,23 +400,74 @@ async def browser_click_by_text(
     highest-ranked match (exact > shortest name) and clicks it via the normal
     OOPIF-safe click path.
 
+    If no registered ref matches, tries a live Playwright locator query
+    (Issue #5 fix: handles DOM changes between snapshot and click, e.g. after
+    SPA navigation or wake_gmx_mail()).
+
     Raises:
-        ValueError: if no registered ref matches ``keyword`` (the message
-            advises taking a fresh snapshot, since refs expire on navigation).
+        ValueError: if no match found in registry AND no live locator matches
+            the keyword (the message advises taking a fresh snapshot).
     """
     matches = manager.registry.find_by_text(keyword, role=role, exact=exact)
-    if not matches:
+    
+    if matches:
+        # Found in the snapshot/registry -- use the ref
+        best = matches[0]
+        result = await browser_click(best["ref"])
+        result["matched"] = {"ref": best["ref"], "name": best["name"], "role": best["role"]}
+        result["match_count"] = len(matches)
+        result["source"] = "registry"
+        return result
+    
+    # Registry miss -- try a live locator as fallback (Issue #5).
+    # This handles DOM changes between snapshot and click (e.g. SPA nav,
+    # wake_gmx_mail, etc.). Map role to selector; fall back to a broad search.
+    page = manager.page
+    selectors = []
+    if role:
+        if role == "button":
+            selectors = ["button", "[role=button]"]
+        elif role == "link":
+            selectors = ["a", "[role=link]"]
+        else:
+            selectors = [f"[role={role}]"]
+    else:
+        # No role specified -- search broadly (buttons, links, clickables)
+        selectors = ["button", "a", "[role=button]", "[role=link]", "[onclick]"]
+    
+    locator = None
+    for sel in selectors:
+        try:
+            loc = page.locator(sel, has_text=keyword if not exact else exact)
+            count = await loc.count()
+            if count > 0:
+                locator = loc.first
+                break
+        except Exception:
+            continue
+    
+    if not locator:
         raise ValueError(
             f"No interactive element matching {keyword!r}"
             + (f" with role={role!r}" if role else "")
-            + " was found. Take a fresh browser_snapshot (or "
-            "browser_snapshot_full_oopif) -- refs expire on navigation/reload."
+            + " was found in the snapshot registry. Tried a live DOM search as"
+            " fallback (to handle SPA changes, wake_gmx_mail, etc.) but also"
+            " found nothing. Take a fresh browser_snapshot or"
+            " browser_snapshot_full_oopif to update the ref store."
         )
-    best = matches[0]
-    result = await browser_click(best["ref"])
-    result["matched"] = {"ref": best["ref"], "name": best["name"], "role": best["role"]}
-    result["match_count"] = len(matches)
-    return result
+    
+    try:
+        await locator.click()
+        return {
+            "status": "clicked",
+            "matched": {"text": keyword, "role": role or "any"},
+            "match_count": 1,
+            "source": "live_locator",
+        }
+    except Exception as e:
+        raise ValueError(
+            f"Live locator matched {keyword!r} but click failed: {str(e)}"
+        )
 
 
 async def browser_upload_file(target: str, file_path: str) -> dict:

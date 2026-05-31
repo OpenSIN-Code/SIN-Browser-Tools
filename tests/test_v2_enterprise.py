@@ -215,3 +215,21 @@ def test_find_by_text_ignores_unlabeled_and_missing():
     reg = _seed_registry()
     assert reg.find_by_text("") == []
     assert reg.find_by_text("nonexistent") == []
+
+
+@pytest.mark.asyncio
+async def test_click_by_text_fallback_to_live_locator():
+    """Issue #5: click_by_text should try a live locator if registry misses."""
+    from sin_browser_tools.core.manager import manager
+    from sin_browser_tools.tools.interaction import browser_click_by_text
+
+    async with BrowserManager(headless=True) as mgr:
+        manager._set_instance(mgr)
+        # Create a button that won't be in the registry (no prior snapshot)
+        await mgr.page.set_content("<button>Dynamic Button</button>")
+        
+        # Registry is empty -> browser_click_by_text should fall back to locator
+        result = await browser_click_by_text("Dynamic Button")
+        assert result["status"] == "clicked"
+        assert result["source"] == "live_locator"
+        assert result["matched"]["text"] == "Dynamic Button"
