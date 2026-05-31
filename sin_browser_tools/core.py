@@ -8,21 +8,30 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 logger = logging.getLogger(__name__)
 
 class ElementRegistry:
+    """Maps stable ref-ids (@e1, @e2, ...) to either a Playwright ElementHandle
+    (high-level API) or a CDP descriptor dict containing a ``backendDOMNodeId``
+    (low-level API, required for OOPIF / Shadow-DOM elements that Playwright
+    cannot resolve)."""
+
     def __init__(self):
-        self.elements: Dict[str, ElementHandle] = {}
+        self.elements: Dict[str, Any] = {}
         self.counter = 0
     
     def clear(self):
         self.elements.clear()
         self.counter = 0
     
-    def register(self, handle: ElementHandle) -> str:
+    def register(self, value: Any) -> str:
+        """Register a Playwright ElementHandle or a CDP descriptor dict.
+
+        Returns the generated ref-id (e.g. ``@e1``).
+        """
         self.counter += 1
         ref_id = f"@e{self.counter}"
-        self.elements[ref_id] = handle
+        self.elements[ref_id] = value
         return ref_id
     
-    def get(self, ref_id: str) -> Optional[ElementHandle]:
+    def get(self, ref_id: str) -> Optional[Any]:
         return self.elements.get(ref_id)
 
 class SINBrowserManager:
