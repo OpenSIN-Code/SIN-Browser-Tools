@@ -71,6 +71,15 @@ class SINBrowserManager:
             })
         self.page.on("dialog", handle_dialog)
 
+    def set_active_page(self, page: Page):
+        """Make ``page`` the active page and (re)attach the dialog handler.
+
+        Used by the tab-management tools when switching/opening/closing tabs so
+        that subsequent actions and dialog capture target the correct page.
+        """
+        self.page = page
+        self._setup_dialog_handler()
+
     async def get_next_dialog(self, timeout: float = 5.0) -> Optional[dict]:
         try:
             return await asyncio.wait_for(self._dialog_queue.get(), timeout=timeout)

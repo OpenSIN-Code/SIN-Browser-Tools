@@ -22,6 +22,47 @@ async def _resolve_target(target: str):
     return target
 
 
+async def _cdp_center(backend_node_id: int):
+    """Return the on-screen center (x, y) of a node via CDP getContentQuads."""
+    cdp = await manager.context.new_cdp_session(manager.page)
+    try:
+        quads_result = await cdp.send(
+            "DOM.getContentQuads", {"backendNodeId": backend_node_id}
+        )
+        quads = quads_result.get("quads", [])
+        if not quads or not quads[0]:
+            raise ValueError("No coordinates found for element")
+        q = quads[0]
+        # quad = [x1,y1, x2,y2, x3,y3, x4,y4]; center = midpoint of opposite corners
+        return (q[0] + q[4]) / 2, (q[1] + q[5]) / 2
+    finally:
+        try:
+            await cdp.detach()
+        except Exception:
+            pass
+
+
+async def _cdp_mouse(x: float, y: float, button: str = "left", click_count: int = 1):
+    """Dispatch a native press/release mouse click at (x, y) via CDP."""
+    cdp = await manager.context.new_cdp_session(manager.page)
+    try:
+        await cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
+        await cdp.send("Input.dispatchMouseEvent", {
+            "type": "mousePressed", "x": x, "y": y,
+            "button": button, "clickCount": click_count,
+        })
+        await asyncio.sleep(0.05)
+        await cdp.send("Input.dispatchMouseEvent", {
+            "type": "mouseReleased", "x": x, "y": y,
+            "button": button, "clickCount": click_count,
+        })
+    finally:
+        try:
+            await cdp.detach()
+        except Exception:
+            pass
+
+
 async def browser_click(target: str) -> dict:
     """Click an element.
 
@@ -62,53 +103,135 @@ async def browser_click_cdp(target: str) -> dict:
             return {"status": "clicked", "target": target}
         raise ValueError(f"Target {target} is not clickable via CDP")
 
-    backend_node_id = resolved["backendDOMNodeId"]
-    cdp = await manager.context.new_cdp_session(manager.page)
-    try:
-        quads_result = await cdp.send(
-            "DOM.getContentQuads", {"backendNodeId": backend_node_id}
-        )
-        quads = quads_result.get("quads", [])
-        if not quads or not quads[0]:
-            raise ValueError(f"No coordinates found for element {target}")
+    cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+    await _cdp_mouse(cx, cy)
+    return {"status": "clicked_cdp", "target": target, "coords": [cx, cy]}
 
-        q = quads[0]
-        # A quad is [x1, y1, x2, y2, x3, y3, x4, y4]. The center is the average
-        # of the top-left (x1,y1) and bottom-right (x3,y3) corners.
-        cx = (q[0] + q[4]) / 2
-        cy = (q[1] + q[5]) / 2
 
-        await cdp.send(
-            "Input.dispatchMouseEvent",
-            {"type": "mouseMoved", "x": cx, "y": cy},
-        )
-        await cdp.send(
-            "Input.dispatchMouseEvent",
-            {
-                "type": "mousePressed",
-                "x": cx,
-                "y": cy,
-                "button": "left",
-                "clickCount": 1,
-            },
-        )
-        await asyncio.sleep(0.05)
-        await cdp.send(
-            "Input.dispatchMouseEvent",
-            {
-                "type": "mouseReleased",
-                "x": cx,
-                "y": cy,
-                "button": "left",
-                "clickCount": 1,
-            },
-        )
-        return {"status": "clicked_cdp", "target": target, "coords": [cx, cy]}
-    finally:
+async def browser_double_click(target: str) -> dict:
+    """Double-click an element (works for both Playwright and CDP refs)."""
+    resolved = await _resolve_target(target)
+    if _is_cdp_descriptor(resolved):
+        cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+        await _cdp_mouse(cx, cy, click_count=2)
+        return {"status": "double_clicked_cdp", "target": target, "coords": [cx, cy]}
+    if hasattr(resolved, "dblclick"):
+        await resolved.dblclick(timeout=5000)
+    else:
+        await manager.page.dblclick(resolved, timeout=5000)
+    return {"status": "double_clicked", "target": target}
+
+
+async def browser_right_click(target: str) -> dict:
+    """Right-click (context menu) an element."""
+    resolved = await _resolve_target(target)
+    if _is_cdp_descriptor(resolved):
+        cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+        await _cdp_mouse(cx, cy, button="right")
+        return {"status": "right_clicked_cdp", "target": target, "coords": [cx, cy]}
+    if hasattr(resolved, "click"):
+        await resolved.click(button="right", timeout=5000)
+    else:
+        await manager.page.click(resolved, button="right", timeout=5000)
+    return {"status": "right_clicked", "target": target}
+
+
+async def browser_hover(target: str) -> dict:
+    """Hover the mouse over an element (reveals menus / tooltips)."""
+    resolved = await _resolve_target(target)
+    if _is_cdp_descriptor(resolved):
+        cx, cy = await _cdp_center(resolved["backendDOMNodeId"])
+        cdp = await manager.context.new_cdp_session(manager.page)
         try:
-            await cdp.detach()
-        except Exception:
-            pass
+            await cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": cx, "y": cy})
+        finally:
+            try:
+                await cdp.detach()
+            except Exception:
+                pass
+        return {"status": "hovered_cdp", "target": target, "coords": [cx, cy]}
+    if hasattr(resolved, "hover"):
+        await resolved.hover(timeout=5000)
+    else:
+        await manager.page.hover(resolved, timeout=5000)
+    return {"status": "hovered", "target": target}
+
+
+async def browser_drag(source: str, target: str) -> dict:
+    """Drag the source element and drop it onto the target element."""
+    src = await _resolve_target(source)
+    dst = await _resolve_target(target)
+
+    # CDP-backed refs: do a manual press-move-release using coordinates.
+    if _is_cdp_descriptor(src) or _is_cdp_descriptor(dst):
+        sx, sy = await _cdp_center(src["backendDOMNodeId"]) if _is_cdp_descriptor(src) else (None, None)
+        tx, ty = await _cdp_center(dst["backendDOMNodeId"]) if _is_cdp_descriptor(dst) else (None, None)
+        if None in (sx, sy, tx, ty):
+            raise ValueError("Drag with mixed CDP/handle targets is not supported")
+        cdp = await manager.context.new_cdp_session(manager.page)
+        try:
+            await cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": sx, "y": sy})
+            await cdp.send("Input.dispatchMouseEvent", {"type": "mousePressed", "x": sx, "y": sy, "button": "left", "clickCount": 1})
+            await cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": tx, "y": ty})
+            await cdp.send("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": tx, "y": ty, "button": "left", "clickCount": 1})
+        finally:
+            try:
+                await cdp.detach()
+            except Exception:
+                pass
+        return {"status": "dragged_cdp", "source": source, "target": target}
+
+    # High-level handles/selectors.
+    if hasattr(src, "hover"):
+        await src.hover()
+        await manager.page.mouse.down()
+        await dst.hover()
+        await manager.page.mouse.up()
+    else:
+        await manager.page.drag_and_drop(src, dst)
+    return {"status": "dragged", "source": source, "target": target}
+
+
+async def browser_select_option(target: str, value: str = None, label: str = None) -> dict:
+    """Select an option in a native <select> dropdown by value or visible label."""
+    resolved = await _resolve_target(target)
+    if _is_cdp_descriptor(resolved):
+        raise ValueError(
+            "select_option is not supported for CDP-backed refs; use a "
+            "browser_snapshot() ref or a selector instead."
+        )
+    kwargs = {}
+    if label is not None:
+        kwargs["label"] = label
+    elif value is not None:
+        kwargs["value"] = value
+    else:
+        raise ValueError("Provide either 'value' or 'label'")
+
+    if hasattr(resolved, "select_option"):
+        selected = await resolved.select_option(**kwargs)
+    else:
+        selected = await manager.page.select_option(resolved, **kwargs)
+    return {"status": "selected", "target": target, "selected": selected}
+
+
+async def browser_check(target: str, checked: bool = True) -> dict:
+    """Check or uncheck a checkbox / radio input."""
+    resolved = await _resolve_target(target)
+    if _is_cdp_descriptor(resolved):
+        # No native check helper for CDP nodes; clicking toggles the control.
+        return await browser_click_cdp(target)
+    if checked:
+        if hasattr(resolved, "check"):
+            await resolved.check(timeout=5000)
+        else:
+            await manager.page.check(resolved, timeout=5000)
+    else:
+        if hasattr(resolved, "uncheck"):
+            await resolved.uncheck(timeout=5000)
+        else:
+            await manager.page.uncheck(resolved, timeout=5000)
+    return {"status": "checked" if checked else "unchecked", "target": target}
 
 
 async def browser_type(target: str, text: str, clear: bool = True) -> dict:
