@@ -140,9 +140,15 @@ async def browser_close_tab(index: int = None) -> dict:
     if was_active and remaining:
         manager.set_active_page(remaining[-1])
     elif not remaining:
-        manager.page = None
+        # BUGFIX: frueher 'manager.page = None'. `page` ist eine read-only
+        # Property (sowohl auf dem Proxy als auch auf BrowserManager) -> das warf
+        # AttributeError und liess den Tab-Close im Fehlerfall haengen. Wir
+        # nutzen jetzt den dafuer vorgesehenen Helper.
+        manager.clear_active_page()
+    # `manager.page` wirft, wenn keine Page mehr aktiv ist -> intern abfragen.
+    active_page = manager.active_page
     return {
         "status": "closed",
         "remaining": len(remaining),
-        "active_url": manager.page.url if manager.page else None,
+        "active_url": active_page.url if active_page else None,
     }

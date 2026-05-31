@@ -6,7 +6,7 @@ Verifiziert die 5 Core-Fixes aus der GMX-Fehleranalyse.
 import asyncio
 import pytest
 
-from sin_browser_tools.core.manager import BrowserManager
+from sin_browser_tools.core.manager import BrowserManager, _RegistryStub
 from sin_browser_tools.core.pii_redaction import PIIRedactor
 from sin_browser_tools.core.session_vault import SessionVault
 from sin_browser_tools.core.frame_traversal import UnifiedFrameTraverser
@@ -174,3 +174,44 @@ async def test_browser_manager_context_manager_cleans_up_on_exception():
     assert crashed
     assert mgr._browser is None
     assert mgr._playwright is None
+
+
+# ---------------------------------------------------------------------------
+# Issue #4: robust text-based ref lookup (no fragile snapshot-string regex)
+# ---------------------------------------------------------------------------
+
+def _seed_registry():
+    reg = _RegistryStub()
+    reg.register({"role": "button", "name": "Accept all", "backendDOMNodeId": 1})
+    reg.register({"role": "link", "name": "Your statement is ready", "backendDOMNodeId": 2})
+    reg.register({"role": "button", "name": "Accept", "backendDOMNodeId": 3})
+    reg.register({"role": "textbox", "name": "", "backendDOMNodeId": 4})  # unlabeled
+    return reg
+
+
+def test_find_by_text_substring_case_insensitive():
+    reg = _seed_registry()
+    matches = reg.find_by_text("STATEMENT")
+    assert len(matches) == 1
+    assert matches[0]["name"] == "Your statement is ready"
+
+
+def test_find_by_text_ranks_exact_then_shortest():
+    reg = _seed_registry()
+    # "accept" is a substring of both "Accept all" and "Accept"; the exact
+    # match ("Accept") must rank first.
+    matches = reg.find_by_text("accept")
+    assert [m["name"] for m in matches] == ["Accept", "Accept all"]
+
+
+def test_find_by_text_role_filter_and_exact():
+    reg = _seed_registry()
+    assert reg.find_by_text("Accept all", role="link") == []
+    exact = reg.find_by_text("accept", exact=True)
+    assert len(exact) == 1 and exact[0]["name"] == "Accept"
+
+
+def test_find_by_text_ignores_unlabeled_and_missing():
+    reg = _seed_registry()
+    assert reg.find_by_text("") == []
+    assert reg.find_by_text("nonexistent") == []

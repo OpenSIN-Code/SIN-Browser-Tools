@@ -364,6 +364,61 @@ async def browser_fill(target: str, value: str) -> dict:
     return await browser_type(target, value, clear=True)
 
 
+async def browser_find_by_text(
+    keyword: str, role: str = None, exact: bool = False
+) -> dict:
+    """Find registered interactive refs by their visible/accessible text.
+
+    Solves Issue #4: instead of regex-parsing the ``browser_snapshot`` *text*
+    (whose format varies -- role prefixes, quoting, OOPIF markers,
+    "(unlabeled)" placeholders), this searches the structured registry that
+    ``browser_click`` already resolves against. Run a snapshot first so refs
+    exist.
+
+    Args:
+        keyword: text to look for (case-insensitive substring, or exact match
+            when ``exact=True``).
+        role: optional role filter, e.g. "button" or "link".
+        exact: require an exact (case-insensitive) name match.
+
+    Returns:
+        ``{"matches": [{"ref": "@eN", "name": ..., "role": ...}, ...],
+           "count": N}`` ordered best-match-first. Feed ``matches[0]["ref"]``
+        straight into ``browser_click``.
+    """
+    matches = manager.registry.find_by_text(keyword, role=role, exact=exact)
+    return {"keyword": keyword, "count": len(matches), "matches": matches}
+
+
+async def browser_click_by_text(
+    keyword: str, role: str = None, exact: bool = False
+) -> dict:
+    """Click the best-matching element by its visible/accessible text.
+
+    Convenience wrapper around ``browser_find_by_text`` + ``browser_click`` so
+    an agent never has to parse snapshot text to obtain a ref. Picks the
+    highest-ranked match (exact > shortest name) and clicks it via the normal
+    OOPIF-safe click path.
+
+    Raises:
+        ValueError: if no registered ref matches ``keyword`` (the message
+            advises taking a fresh snapshot, since refs expire on navigation).
+    """
+    matches = manager.registry.find_by_text(keyword, role=role, exact=exact)
+    if not matches:
+        raise ValueError(
+            f"No interactive element matching {keyword!r}"
+            + (f" with role={role!r}" if role else "")
+            + " was found. Take a fresh browser_snapshot (or "
+            "browser_snapshot_full_oopif) -- refs expire on navigation/reload."
+        )
+    best = matches[0]
+    result = await browser_click(best["ref"])
+    result["matched"] = {"ref": best["ref"], "name": best["name"], "role": best["role"]}
+    result["match_count"] = len(matches)
+    return result
+
+
 async def browser_upload_file(target: str, file_path: str) -> dict:
     resolved = await _resolve_target(target)
     if _is_cdp_descriptor(resolved):

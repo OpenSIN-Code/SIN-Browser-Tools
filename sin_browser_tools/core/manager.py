@@ -47,6 +47,10 @@ class BrowserManager:
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
+        # PID des lokal gestarteten Chromium -- nur gesetzt, wenn WIR den Prozess
+        # gestartet haben (nicht bei connect_cdp). Wird fuer gezieltes,
+        # session-lokales Zombie-Cleanup verwendet.
+        self._browser_pid: Optional[int] = None
         self._lock = asyncio.Lock()
         self._started = False
 
@@ -126,9 +130,48 @@ class BrowserManager:
             if self.stealth:
                 await self._apply_stealth(self._page)
 
+            self._browser_pid = self._resolve_browser_pid()
+
             self._started = True
-            logger.info("BrowserManager started", headless=self.headless)
+            logger.info(
+                "BrowserManager started",
+                headless=self.headless,
+                browser_pid=self._browser_pid,
+            )
             return self
+
+    def _resolve_browser_pid(self) -> Optional[int]:
+        """Versucht, die OS-PID des gestarteten Chromium-Prozesses zu ermitteln.
+
+        Playwright legt die PID je nach Version unter
+        ``browser._impl_obj._connection._transport._proc`` oder aehnlich ab.
+        Schlaegt das fehl, geben wir None zurueck und das Cleanup faellt
+        sicher auf 'nichts killen' zurueck (besser als fremde Prozesse killen).
+        """
+        candidates = []
+        try:
+            browser = self._browser
+            if browser is not None:
+                impl = getattr(browser, "_impl_obj", None)
+                conn = getattr(impl, "_connection", None)
+                transport = getattr(conn, "_transport", None)
+                proc = getattr(transport, "_proc", None)
+                if proc is not None and getattr(proc, "pid", None):
+                    candidates.append(proc.pid)
+        except Exception:
+            pass
+        # Persistent-context-Launch: Browser haengt am Context.
+        try:
+            if not candidates and self._context is not None:
+                impl = getattr(self._context, "_impl_obj", None)
+                br = getattr(impl, "_browser", None)
+                conn = getattr(getattr(br, "_connection", None), "_transport", None)
+                proc = getattr(conn, "_proc", None)
+                if proc is not None and getattr(proc, "pid", None):
+                    candidates.append(proc.pid)
+        except Exception:
+            pass
+        return candidates[0] if candidates else None
 
     async def _apply_stealth(self, page: Page):
         """Injiziert Stealth-Patches gegen Bot-Detection."""
@@ -198,6 +241,7 @@ class BrowserManager:
             self._browser = None
             self._playwright = None
             self._page = None
+            self._browser_pid = None
 
             if errors:
                 logger.warning("Cleanup completed with errors", errors=errors)
@@ -205,15 +249,31 @@ class BrowserManager:
                 logger.info("Cleanup completed successfully")
 
     async def _kill_zombie_processes(self):
-        """Killed verwaiste Chromium/Playwright-Prozesse."""
+        """Killed NUR den von DIESEM Manager gestarteten Chromium-Prozessbaum.
+
+        BUGFIX: Frueher lief hier ein globales
+            pkill -f 'chromium.*playwright'
+        Das killt ALLE Chromium-Prozesse im Container -- in einem
+        Kubernetes-Pod mit mehreren parallelen BrowserManager-Sessions reisst
+        das Cleanup einer Session also die Browser ALLER anderen Sessions mit.
+        Wir killen jetzt gezielt nur unseren eigenen Browser-PID-Baum.
+
+        Bei einem ueber CDP verbundenen (remote) Browser starten WIR den Prozess
+        nicht -- dann darf auch nichts gekillt werden.
+        """
+        pid = self._browser_pid
+        if pid is None:
+            return
         try:
             if os.name == "posix":
+                # SIGTERM an den gesamten Prozessbaum (negativer PID = Prozessgruppe
+                # falls vorhanden; sonst direkter PID). pkill -P killt Kinder.
                 proc = await asyncio.create_subprocess_shell(
-                    "pkill -f 'chromium.*playwright' 2>/dev/null || true"
+                    f"pkill -TERM -P {pid} 2>/dev/null; kill -TERM {pid} 2>/dev/null || true"
                 )
                 await proc.wait()
         except Exception as e:
-            logger.debug("Zombie kill failed", error=str(e))
+            logger.debug("Zombie kill failed", pid=pid, error=str(e))
 
     @asynccontextmanager
     async def session(self):
@@ -300,6 +360,28 @@ class BrowserManager:
         # Sicherstellen, dass der Context auch zum neuen Tab passt
         if page.context is not self._context:
             self._context = page.context
+        # @eN-Refs sind seitenlokal (backendDOMNodeIds gelten nur im Target der
+        # Snapshot-Page). Nach einem Tab-Wechsel zeigen sie auf den falschen Tab.
+        # Daher hier die Registry leeren -- der Aufrufer muss neu snapshotten.
+        reg = self.__dict__.get("_registry_stub")
+        if reg is not None:
+            reg.clear()
+
+    def clear_active_page(self) -> None:
+        """Setzt die aktive Page auf None (z.B. nachdem der letzte Tab zuging).
+
+        Wird benoetigt, weil ``page`` eine read-only Property ist und nicht
+        direkt auf None gesetzt werden kann.
+        """
+        self._page = None
+        reg = self.__dict__.get("_registry_stub")
+        if reg is not None:
+            reg.clear()
+
+    @property
+    def active_page(self) -> Optional[Page]:
+        """Wie ``page``, wirft aber NICHT, wenn keine Page aktiv ist."""
+        return self._page
 
     @property
     def browser(self) -> Optional[Browser]:
@@ -371,11 +453,26 @@ class _ManagerProxy:
         return self._require()._playwright
 
     # registry wird von den v1.x-tools benoetigt -- in v2.0 nicht mehr Teil
-    # des Managers, daher liefern wir ein Stub-Objekt zurueck das alle
-    # Zugriffe protokolliert ohne zu crashen.
+    # des Managers, daher haengen wir EINE persistente Registry an die aktive
+    # BrowserManager-Instanz.
+    #
+    # BUGFIX: Frueher wurde hier
+    #     self._require().__dict__.get("_registry_stub", _RegistryStub())
+    # zurueckgegeben. Da "_registry_stub" NIE gesetzt wurde, lieferte jeder
+    # Zugriff eine FRISCHE, leere _RegistryStub-Instanz. Folge:
+    #   - registry.register(...) schrieb in ein Wegwerf-Objekt
+    #   - registry.get("@e1") las aus einem anderen, leeren Objekt -> None
+    #   - len(registry) war immer 0
+    # Damit war das komplette @eN-Ref-System (snapshot -> click/type) kaputt.
+    # Wir cachen die Registry jetzt EINMAL pro Instanz.
     @property
     def registry(self):
-        return self._require().__dict__.get("_registry_stub", _RegistryStub())
+        inst = self._require()
+        reg = inst.__dict__.get("_registry_stub")
+        if reg is None:
+            reg = _RegistryStub()
+            inst._registry_stub = reg
+        return reg
 
     def set_active_page(self, page: Page) -> None:
         self._require().set_active_page(page)
@@ -430,6 +527,68 @@ class _RegistryStub:
 
     def clear(self) -> None:
         self._store.clear()
+
+    def items(self):
+        """(ref_id, data)-Paare in Einfuege-/Snapshot-Reihenfolge."""
+        return self._store.items()
+
+    def find_by_text(
+        self,
+        keyword: str,
+        *,
+        role: Optional[str] = None,
+        exact: bool = False,
+    ) -> list:
+        """Sucht registrierte Refs anhand ihres Accessible-Name (case-insensitive).
+
+        Loest Issue #4: Agenten mussten bisher den Snapshot-TEXT per Regex
+        parsen, um ein ``@eN`` zu finden -- fragil, weil sich das Ausgabeformat
+        aendert (Rolle, Anfuehrungszeichen, OOPIF-Praefixe, "(unlabeled)" ...).
+        Stattdessen durchsuchen wir hier direkt die strukturierten
+        Registry-Eintraege (jeder Eintrag hat ``name``/``role``), die exakt dem
+        entsprechen, was ``browser_click`` ohnehin aufloest.
+
+        Args:
+            keyword: gesuchter Text (Teilstring-Match, ausser ``exact=True``).
+            role: optionaler Rollen-Filter (z.B. "button", "link").
+            exact: bei True muss der Name exakt (case-insensitive) passen.
+
+        Returns:
+            Liste von ``{"ref", "name", "role"}`` -- nach Match-Qualitaet
+            sortiert: exakte Treffer zuerst, dann kuerzeste (spezifischste) Namen.
+        """
+        if not keyword:
+            return []
+        needle = keyword.strip().casefold()
+        matches = []
+        for ref_id, data in self._store.items():
+            name = (data.get("name") or "").strip()
+            if not name:
+                continue
+            if role is not None and data.get("role") != role:
+                continue
+            hay = name.casefold()
+            is_exact = hay == needle
+            if exact:
+                if not is_exact:
+                    continue
+            elif needle not in hay:
+                continue
+            matches.append(
+                {
+                    "ref": ref_id,
+                    "name": name,
+                    "role": data.get("role"),
+                    "_exact": is_exact,
+                    "_len": len(name),
+                }
+            )
+        # Exakte Treffer zuerst, dann kuerzester (spezifischster) Name.
+        matches.sort(key=lambda m: (not m["_exact"], m["_len"]))
+        for m in matches:
+            m.pop("_exact", None)
+            m.pop("_len", None)
+        return matches
 
     def __len__(self) -> int:
         return len(self._store)

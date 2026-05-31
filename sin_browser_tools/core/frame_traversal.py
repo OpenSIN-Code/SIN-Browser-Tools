@@ -4,8 +4,12 @@ Scannt ALLE Frames -- OOPIF, Same-Process, Same-Origin, Shadow DOM.
 Loest das GMX-OOPIF-Problem architektonisch.
 
 Kernbeobachtung: Playwright's page.frames gibt IMMER alle Frames zurueck,
-unabhaengig von Site-Isolation und Process-Boundaries. Wir muessen nie
-CDP-Sessions erzwingen -- frame.accessibility.snapshot() ist OOPIF-agnostisch.
+unabhaengig von Site-Isolation und Process-Boundaries.
+
+Den Accessibility-Tree holen wir pro Frame ueber eine an den Frame gebundene
+CDP-Session (Accessibility.getFullAXTree). Hinweis: Eine
+``frame.accessibility``-API gibt es in Playwright Python NICHT -- der frueher
+hier genutzte Aufruf war ein No-Op, der den AX-Tree immer leer liess.
 """
 
 import asyncio
@@ -38,8 +42,9 @@ class UnifiedFrameTraverser:
     Durchsucht ALLE Frames eines Pages -- unabhaengig von Site-Isolation,
     Process-Boundaries oder Shadow DOM Mode.
 
-    Der Schluessel: Playwright's native frame.accessibility.snapshot() arbeitet
-    transparent ueber OOPIF-Grenzen hinweg. Wir brauchen kein new_cdp_session().
+    Der Schluessel: pro Frame wird eine an den Frame gebundene CDP-Session
+    geoeffnet (Accessibility.getFullAXTree). Da die Session am Frame-Target
+    haengt, liefert auch ein Cross-Origin-OOPIF seinen eigenen AX-Tree.
     """
 
     def __init__(self, pierce_shadow: bool = True, include_html: bool = False):
@@ -71,17 +76,100 @@ class UnifiedFrameTraverser:
 
         return results
 
+    async def _cdp_ax_tree(self, frame: Frame, page: Page) -> Optional[dict]:
+        """Holt den Accessibility-Tree eines Frames via CDP und baut einen
+        verschachtelten Baum (role/name/children) -- OOPIF-sicher.
+
+        Bindet die CDP-Session an den FRAME (nicht die Page), damit auch
+        Cross-Origin-OOPIFs ihren eigenen AX-Tree liefern. Faellt bei Fehlern
+        sauber auf None zurueck.
+        """
+        try:
+            cdp = await page.context.new_cdp_session(frame)
+        except Exception as e:
+            logger.debug("CDP session for frame failed", url=frame.url, error=str(e))
+            return None
+        try:
+            await cdp.send("Accessibility.enable")
+            result = await cdp.send(
+                "Accessibility.getFullAXTree",
+                {"pierce": self.pierce_shadow},
+            )
+            nodes = result.get("nodes", [])
+            return self._build_nested_ax_tree(nodes)
+        except Exception as e:
+            logger.debug("AX getFullAXTree failed", url=frame.url, error=str(e))
+            return None
+        finally:
+            try:
+                await cdp.detach()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _build_nested_ax_tree(nodes: list) -> Optional[dict]:
+        """Wandelt den flachen CDP-AX-Node-Stream in einen verschachtelten Baum
+        mit ``role``/``name``/``children`` um (Form aehnlich der alten
+        Playwright-Snapshot-API, damit Downstream-Code unveraendert bleibt).
+        """
+        if not nodes:
+            return None
+
+        by_id: dict[str, dict] = {}
+        for n in nodes:
+            node_id = n.get("nodeId")
+            if node_id is None:
+                continue
+            by_id[node_id] = {
+                "role": (n.get("role") or {}).get("value", "unknown"),
+                "name": ((n.get("name") or {}).get("value") or ""),
+                "value": (n.get("value") or {}).get("value", ""),
+                "_childIds": n.get("childIds", []),
+                "_ignored": n.get("ignored", False),
+                "children": [],
+            }
+
+        # Eltern-Kind-Verknuepfung aufbauen; Wurzel = Knoten ohne Parent.
+        child_ids = set()
+        for node in by_id.values():
+            for cid in node["_childIds"]:
+                child = by_id.get(cid)
+                if child is not None:
+                    node["children"].append(child)
+                    child_ids.add(cid)
+
+        roots = [
+            node for nid, node in by_id.items() if nid not in child_ids
+        ]
+
+        def _clean(node: dict) -> dict:
+            node.pop("_childIds", None)
+            node.pop("_ignored", None)
+            node["children"] = [_clean(c) for c in node["children"]]
+            return node
+
+        roots = [_clean(r) for r in roots]
+        if not roots:
+            return None
+        if len(roots) == 1:
+            return roots[0]
+        return {"role": "RootWebArea", "name": "", "value": "", "children": roots}
+
     async def _analyze_frame(self, frame: Frame, page: Page) -> FrameInfo:
         """Analysiert einen einzelnen Frame."""
         frame_type = self._detect_frame_type(frame)
 
-        # Playwright's frame.accessibility.snapshot() ist OOPIF-agnostisch:
-        # es funktioniert fuer ALLE Frames ohne CDP-Sessions zu erzwingen.
-        ax_tree = None
-        try:
-            ax_tree = await frame.accessibility.snapshot(interesting_only=False)
-        except Exception as e:
-            logger.debug("AX snapshot failed for frame", url=frame.url, error=str(e))
+        # BUGFIX: Frueher wurde hier 'frame.accessibility.snapshot()' aufgerufen.
+        # DIESE API EXISTIERT IN PLAYWRIGHT PYTHON NICHT (weder auf Frame noch
+        # auf Page) -- der Aufruf warf immer AttributeError, wurde verschluckt,
+        # und ax_tree blieb fuer JEDEN Frame None. Damit war der komplette
+        # UnifiedFrameTraverser (und deep_snapshot, das darauf aufbaut) faktisch
+        # leer/kaputt.
+        #
+        # Wir holen den AX-Tree jetzt ueber eine CDP-Session, die an den Frame
+        # gebunden ist (OOPIF-sicher), und bauen den flachen Node-Stream in
+        # einen verschachtelten Baum um -- aequivalent zur frueheren API-Form.
+        ax_tree = await self._cdp_ax_tree(frame, page)
 
         shadow_roots = []
         if self.pierce_shadow:

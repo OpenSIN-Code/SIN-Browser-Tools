@@ -75,9 +75,11 @@ class TraceLogger:
 
         self._network_buffer = []
 
+        listener_attached = False
         try:
             if page:
                 page.on("response", self._capture_network)
+                listener_attached = True
 
             result = await func()
             trace.result = self._safe_serialize(result)
@@ -90,6 +92,16 @@ class TraceLogger:
             raise
 
         finally:
+            # BUGFIX: Listener IMMER wieder entfernen. Frueher wurde der
+            # "response"-Listener bei jedem Tool-Call neu registriert und nie
+            # geloest -> Listener-Leak (jeder Call sammelte zusaetzlich die
+            # Responses aller vorherigen Calls + stetig wachsender Speicher).
+            if listener_attached and page:
+                try:
+                    page.remove_listener("response", self._capture_network)
+                except Exception:
+                    pass
+
             trace.duration_ms = (time.time() - trace.started_at) * 1000
 
             if page and capture_screenshot:

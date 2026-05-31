@@ -39,20 +39,26 @@ browser_navigate("https://www.gmx.net")
 browser_wait_for_load("networkidle")
 # handle the cookie/consent wall if present:
 browser_snapshot
-# if you see e.g. @e2 "button Accept all" -> click it
-browser_click("@e2")
+# click the consent button BY TEXT — no need to eyeball/parse a ref:
+browser_click_by_text("Accept all")
 browser_wait_for_load("networkidle")
 # now log in (see Recipe 1) ...
 # then OPEN the inbox content — use the OOPIF-aware snapshot:
 browser_snapshot_full_oopif
-# find the first message, e.g. @e44 "Email from Bank – Your statement"
-browser_click_cdp("@e44")               # CDP click reaches into the OOPIF
+# find the message by subject text instead of regex-matching the snapshot:
+browser_find_by_text("Your statement")   # -> {"matches": [{"ref": "@e44", ...}]}
+browser_click("@e44")                     # auto-routes through the OOPIF-safe path
 browser_wait_for_text("Reply")
-browser_snapshot_full_oopif             # VERIFY: message body is visible
-browser_get_text                        # read the email content
+browser_snapshot_full_oopif               # VERIFY: message body is visible
+browser_get_text                          # read the email content
 ```
 
-Key point: webmail = `browser_snapshot_full_oopif` + `browser_click_cdp`.
+Key point: webmail = `browser_snapshot_full_oopif` + click by text/ref.
+
+> Prefer `browser_find_by_text` / `browser_click_by_text` over hand-rolled
+> regex against the snapshot string. The snapshot **text** format can change
+> (role names, quoting, `(unlabeled)`, OOPIF prefixes); these helpers query the
+> structured ref registry directly and are stable.
 
 ---
 
