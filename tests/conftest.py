@@ -6,6 +6,8 @@ so that a regression in any tool's wiring is caught deterministically and
 offline.
 """
 
+from html import escape
+
 import pytest
 
 from sin_browser_tools.core.manager import BrowserManager, manager
@@ -16,6 +18,28 @@ _PNG_1PX = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 )
+
+# Mirrors the GMX structure from Issue #11: a named ("mail") same-process iframe
+# whose email rows are custom elements (<list-mail-item>) nested in OPEN shadow
+# DOM. The accessibility tree is blind to these (custom elements have no role),
+# and document.querySelectorAll('list-mail-item') on the frame returns 0 because
+# it does not pierce shadow roots -- exactly the bug the new frame tools fix.
+MAIL_FRAME_HTML = """<!doctype html><html><body>
+<mail-list-container></mail-list-container>
+<script>
+customElements.define('list-mail-item', class extends HTMLElement {
+  constructor(){ super(); const r=this.attachShadow({mode:'open'});
+    r.innerHTML = '<div class="subject">'+this.getAttribute('subject')+'</div>'; }
+});
+customElements.define('mail-list-container', class extends HTMLElement {
+  constructor(){ super(); const r=this.attachShadow({mode:'open'});
+    const subs=['Invoice 2026-01','Welcome aboard','Your receipt'];
+    r.innerHTML = subs.map(function(s){
+      return '<list-mail-item subject="'+s+'"></list-mail-item>'; }).join(''); }
+});
+</script>
+</body></html>"""
+
 
 # Self-contained fixture page. Covers the element types every interaction /
 # extraction / vision tool needs: heading, button (with click side effect),
@@ -40,6 +64,7 @@ FIXTURE_HTML = """<!doctype html>
   <label><input id="chk" type="checkbox" aria-label="Agree" /> Agree</label>
   <img id="logo" src="{png}" alt="logo" width="1" height="1" />
   <iframe id="frame" srcdoc="<button>inner button</button>"></iframe>
+  <iframe id="mail" name="mail" srcdoc="{mail_srcdoc}"></iframe>
   <div id="result"></div>
   <script>
     document.getElementById('btn').addEventListener('click', () => {{
@@ -47,7 +72,7 @@ FIXTURE_HTML = """<!doctype html>
     }});
   </script>
 </body>
-</html>""".format(png=_PNG_1PX)
+</html>""".format(png=_PNG_1PX, mail_srcdoc=escape(MAIL_FRAME_HTML, quote=True))
 
 
 # Fake origin the fixture is served from. Using a real ``http://`` origin (via
@@ -77,6 +102,24 @@ async def live_manager():
 
     await mgr.page.route(FIXTURE_URL, _serve_fixture)
     await mgr.page.goto(FIXTURE_URL, wait_until="domcontentloaded")
+
+    # The "mail" srcdoc iframe (GMX-like shadow-DOM fixture) loads its child
+    # frame and upgrades its custom elements asynchronously -- domcontentloaded
+    # on the top document does not wait for it, and the child Frame object (and
+    # its .name) may not be exposed yet. srcdoc is same-origin, so we poll from
+    # the PARENT document into the iframe's contentDocument until the shadow rows
+    # exist. This makes the frame-tool tests deterministic.
+    try:
+        await mgr.page.wait_for_function(
+            "() => { const ifr = document.getElementById('mail');"
+            " const doc = ifr && ifr.contentDocument;"
+            " const c = doc && doc.querySelector('mail-list-container');"
+            " return !!(c && c.shadowRoot && c.shadowRoot.childElementCount >= 3); }",
+            timeout=5000,
+        )
+    except Exception:
+        pass
+
     try:
         yield mgr
     finally:
