@@ -19,6 +19,8 @@ Why this module exists (Issue #11):
          actually read shadow-DOM content like email subjects.
 """
 
+import re
+
 from sin_browser_tools.core import manager
 
 # ---------------------------------------------------------------------------
@@ -297,4 +299,131 @@ async def browser_snapshot_in_frame(
     if hints:
         result["hint"] = " ".join(hints)
         result["hints"] = hints
+    return result
+
+
+# ---------------------------------------------------------------------------
+# browser_scan_frames — scan ALL frames for text content (Issue #15)
+# ---------------------------------------------------------------------------
+
+async def browser_scan_frames(
+    pattern: str = None,
+    regex: str = None,
+    include_empty: bool = False,
+    max_text_len: int = 5000,
+) -> dict:
+    """Scan ALL frames on the current page for text content.
+
+    This is the tool for pages (like GMX webmailer) where content lives in an
+    unnamed, URL-less `about:blank` iframe that cannot be targeted by name or URL.
+    Instead of guessing which frame to target, this tool iterates every frame,
+    extracts its text, and optionally filters by pattern/regex.
+
+    Args:
+        pattern: Substring to search for (case-insensitive). If provided, only
+                 frames whose text contains this substring are returned.
+        regex: Regex pattern to search for. If provided, only frames whose text
+               matches this regex are returned. Takes precedence over pattern.
+        include_empty: If True, include frames with no/empty text in results.
+        max_text_len: Truncate each frame's text to this length (default 5000).
+
+    Returns:
+        dict with:
+          - total_frames: Number of frames on the page
+          - matching_frames: Number of frames that matched (or all if no filter)
+          - frames: List of matching frame info dicts, each with:
+              - index: Frame index in page.frames
+              - name: Frame name (may be empty)
+              - url: Frame URL (may be 'about:blank' or empty)
+              - text: Extracted text (truncated to max_text_len)
+              - text_length: Full text length before truncation
+              - matches: List of match strings (if pattern/regex provided)
+          - hint: Guidance if no frames matched
+
+    Use case (GMX email body):
+        After clicking an email, the body loads in an unnamed iframe. Use:
+          browser_scan_frames(pattern="verify") to find OTP verification URLs
+          browser_scan_frames(regex=r"\\d{6}") to find 6-digit OTP codes
+    """
+    page = manager.page
+    frames = page.frames
+    results = []
+    compiled_regex = None
+
+    if regex:
+        try:
+            compiled_regex = re.compile(regex, re.IGNORECASE | re.MULTILINE)
+        except re.error as e:
+            return {"error": f"Invalid regex: {e}"}
+
+    for idx, frame in enumerate(frames):
+        try:
+            # Try multiple extraction methods for robustness
+            text = await frame.evaluate(
+                "() => document.body ? document.body.innerText || document.body.textContent || '' : ''"
+            )
+        except Exception:
+            # Frame may be cross-origin or detached
+            text = ""
+
+        text_length = len(text)
+        if not include_empty and not text.strip():
+            continue
+
+        matches = []
+        if compiled_regex:
+            matches = compiled_regex.findall(text)
+            if not matches:
+                continue
+        elif pattern:
+            if pattern.lower() not in text.lower():
+                continue
+            # Find all occurrences for context
+            lower_text = text.lower()
+            lower_pattern = pattern.lower()
+            pos = 0
+            while True:
+                pos = lower_text.find(lower_pattern, pos)
+                if pos == -1:
+                    break
+                # Extract match with context (50 chars before/after)
+                start = max(0, pos - 50)
+                end = min(len(text), pos + len(pattern) + 50)
+                matches.append(text[start:end])
+                pos += 1
+
+        frame_info = {
+            "index": idx,
+            "name": frame.name or "",
+            "url": frame.url or "",
+            "text": text[:max_text_len] + ("..." if text_length > max_text_len else ""),
+            "text_length": text_length,
+        }
+        if matches:
+            frame_info["matches"] = matches[:20]  # Limit matches
+            frame_info["match_count"] = len(matches) if len(matches) <= 20 else "20+ (showing first 20)"
+        results.append(frame_info)
+
+    result = {
+        "total_frames": len(frames),
+        "matching_frames": len(results),
+        "frames": results,
+    }
+
+    if not results:
+        hints = []
+        if pattern or regex:
+            hints.append(
+                f"No frames contained {'regex ' + repr(regex) if regex else 'pattern ' + repr(pattern)}. "
+                "Try browser_scan_frames() without a filter to see all frame contents, "
+                "or wait for the content to load with browser_wait."
+            )
+        else:
+            hints.append(
+                "All frames were empty. The page may still be loading — try "
+                "browser_wait, then browser_scan_frames again."
+            )
+        result["hint"] = " ".join(hints)
+        result["hints"] = hints
+
     return result

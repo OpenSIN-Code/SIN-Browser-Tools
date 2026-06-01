@@ -382,11 +382,27 @@ class BrowserManager:
 
         Loescht automatisch alle @eN-Refs aus der Registry (falls vorhanden),
         da Refs seitenlokal sind und nach einem Tab-Wechsel nicht mehr gueltig.
+
+        BUGFIX (Issue #14): Validiert die uebergebene Page, damit ein
+        AttributeError ('NoneType' has no attribute 'context') bei kaputten
+        Pages oder falscher Nutzung sofort klar wird statt kryptisch zu crashen.
         """
+        if page is None:
+            raise ValueError(
+                "set_active_page(page): page darf nicht None sein. "
+                "Tipp: manager.browser.contexts[0].pages liefert alle offenen Tabs."
+            )
+        if not hasattr(page, "context") or page.context is None:
+            raise ValueError(
+                f"set_active_page(page): Die uebergebene Page {page!r} hat keinen "
+                "gueltigen context. Moeglicherweise ist sie geschlossen oder stammt "
+                "aus einem anderen Browser."
+            )
         self._page = page
-        # Sicherstellen, dass der Context auch zum neuen Tab passt
-        if page.context is not self._context:
-            self._context = page.context
+        # Sicherstellen, dass der Context auch zum neuen Tab passt — immer
+        # aktualisieren, da self._context None sein kann (z.B. nach connect_cdp
+        # ohne offene Tabs).
+        self._context = page.context
         # @eN-Refs sind seitenlokal (backendDOMNodeIds gelten nur im Target der
         # Snapshot-Page). Nach einem Tab-Wechsel zeigen sie auf den falschen Tab.
         # Daher hier die Registry leeren -- der Aufrufer muss neu snapshotten.

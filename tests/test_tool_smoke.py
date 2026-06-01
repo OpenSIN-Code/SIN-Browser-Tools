@@ -376,3 +376,52 @@ async def test_snapshot_in_frame_by_url_substring(live_manager):
     # Main fixture origin is http://smoke.test/, so example.com won't match a
     # frame here -> a helpful error, not a crash.
     assert "error" in res
+
+
+# ---------------------------------------------------------------------------
+# browser_scan_frames — scan ALL frames for text (Issue #15)
+# ---------------------------------------------------------------------------
+
+async def test_scan_frames_finds_all_frames(live_manager):
+    res = await frames.browser_scan_frames()
+    # Should find main + 2 iframes minimum
+    assert res["total_frames"] >= 3
+
+
+async def test_scan_frames_pattern_filter(live_manager):
+    # The mail iframe contains "Invoice 2026-01" in a shadow DOM element
+    res = await frames.browser_scan_frames(pattern="Invoice")
+    assert res["matching_frames"] >= 1
+    # At least one frame should have matches
+    assert any(f.get("matches") for f in res["frames"])
+
+
+async def test_scan_frames_regex_filter(live_manager):
+    # Find frames with 4-digit year pattern
+    res = await frames.browser_scan_frames(regex=r"202\d")
+    assert res["matching_frames"] >= 1
+
+
+async def test_scan_frames_no_match_returns_hint(live_manager):
+    res = await frames.browser_scan_frames(pattern="xyznonexistent123")
+    assert res["matching_frames"] == 0
+    assert "hint" in res
+
+
+# ---------------------------------------------------------------------------
+# set_active_page validation (Issue #14)
+# ---------------------------------------------------------------------------
+
+async def test_set_active_page_rejects_none(live_manager):
+    from sin_browser_tools.core.manager import manager
+    import pytest
+    with pytest.raises(ValueError, match="page darf nicht None sein"):
+        manager.set_active_page(None)
+
+
+async def test_set_active_page_accepts_valid_page(live_manager):
+    from sin_browser_tools.core.manager import manager
+    # Get the current page and re-set it (should work without error)
+    page = manager.page
+    manager.set_active_page(page)
+    assert manager.page is page
