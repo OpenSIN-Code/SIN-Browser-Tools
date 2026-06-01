@@ -5,6 +5,15 @@ All notable changes to SIN-Browser-Tools.
 ## [Unreleased]
 
 ### Added
+- **browser_wait_for_text enhancements** (Issue #22):
+  - Shadow DOM support: Searches across OPEN shadow roots
+  - Element info return: Returns tag, id, className of first matching element
+  - Configurable polling: 500ms default interval (per spec), adjustable via `poll_interval`
+  - Frame support: `frame_name` and `frame_url` parameters for iframe targeting
+  - Clear timeout errors with method info (`immediate`/`poll`/`timeout`)
+- Updated `navigation.md` documentation with complete API reference for wait tools
+
+### Added
 - **Frame tools** (Issue #11, #12, #15):
   - `browser_list_frames` — list all frames on page
   - `browser_eval_in_frame` — run JS in specific frame by name/URL

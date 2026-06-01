@@ -64,17 +64,225 @@ async def browser_wait_for(selector: str, state: str = "visible", timeout: float
         return {"status": "timeout", "selector": selector, "error": str(e)}
 
 
-async def browser_wait_for_text(text: str, timeout: float = 10000) -> dict:
-    """Wait until the given text appears anywhere on the page."""
+# ---------------------------------------------------------------------------
+# browser_wait_for_text -- SPA-safe text waiter with Shadow DOM support
+# (Issue #22: https://github.com/OpenSIN-Code/SIN-Browser-Tools/issues/22)
+#
+# Features:
+#   - Polls at 500ms intervals (configurable)
+#   - Shadow DOM text content support (OPEN shadow roots)
+#   - Returns element info (tag, id) when found
+#   - Clear timeout error messages
+#   - Works across iframes via frame_name/frame_url parameters
+# ---------------------------------------------------------------------------
+
+_WAIT_FOR_TEXT_JS = r"""
+(args) => {
+  const { targetText, timeoutMs, pierceShadow, pollIntervalMs } = args;
+  const needle = targetText;
+
+  // Collect visible text across the document AND any OPEN shadow roots.
+  // Returns { text: string, elements: Array<{tag, id, text}> }
+  const collectTextAndElements = () => {
+    let allText = (document.body && document.body.innerText) || '';
+    const matchingElements = [];
+
+    // Check main document body first
+    if (document.body && document.body.innerText && document.body.innerText.includes(needle)) {
+      // Try to find the specific element containing the text
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.textContent && node.textContent.includes(needle)) {
+          const el = node.parentElement;
+          if (el) {
+            matchingElements.push({
+              tag: el.tagName.toLowerCase(),
+              id: el.id || null,
+              className: el.className || null,
+              text: node.textContent.trim().substring(0, 100)
+            });
+          }
+        }
+      }
+    }
+
+    // Pierce shadow DOM if enabled
+    if (pierceShadow && document.body) {
+      const stack = [document.body];
+      while (stack.length) {
+        const root = stack.pop();
+        let elements;
+        try { elements = root.querySelectorAll('*'); } catch (e) { continue; }
+        elements.forEach((el) => {
+          if (el.shadowRoot && el.shadowRoot.mode === 'open') {
+            const shadowText = el.shadowRoot.textContent || '';
+            allText += ' ' + shadowText;
+            if (shadowText.includes(needle)) {
+              // Search within shadow root for specific element
+              const shadowWalker = document.createTreeWalker(
+                el.shadowRoot,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+              );
+              let sNode;
+              while ((sNode = shadowWalker.nextNode())) {
+                if (sNode.textContent && sNode.textContent.includes(needle)) {
+                  const sEl = sNode.parentElement;
+                  if (sEl) {
+                    matchingElements.push({
+                      tag: sEl.tagName.toLowerCase(),
+                      id: sEl.id || null,
+                      className: sEl.className || null,
+                      text: sNode.textContent.trim().substring(0, 100),
+                      inShadowRoot: true,
+                      hostTag: el.tagName.toLowerCase()
+                    });
+                  }
+                }
+              }
+            }
+            stack.push(el.shadowRoot);
+          }
+        });
+      }
+    }
+
+    return { text: allText, elements: matchingElements };
+  };
+
+  const check = () => {
+    const { text, elements } = collectTextAndElements();
+    return { found: text.includes(needle), elements };
+  };
+
+  return new Promise((resolve) => {
+    const initial = check();
+    if (initial.found) {
+      resolve({
+        found: true,
+        method: 'immediate',
+        element: initial.elements[0] || null,
+        matchCount: initial.elements.length
+      });
+      return;
+    }
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(pollTimer);
+      clearTimeout(timeoutTimer);
+      resolve(result);
+    };
+
+    // Poll at specified interval (default 500ms per Issue #22 spec)
+    const pollTimer = setInterval(() => {
+      const result = check();
+      if (result.found) {
+        finish({
+          found: true,
+          method: 'poll',
+          element: result.elements[0] || null,
+          matchCount: result.elements.length
+        });
+      }
+    }, pollIntervalMs);
+
+    // Timeout handler
+    const timeoutTimer = setTimeout(() => {
+      const finalCheck = check();
+      finish({
+        found: finalCheck.found,
+        method: finalCheck.found ? 'timeout_check' : 'timeout',
+        element: finalCheck.elements[0] || null,
+        matchCount: finalCheck.elements.length
+      });
+    }, timeoutMs);
+  });
+}
+"""
+
+
+async def browser_wait_for_text(
+    text: str,
+    timeout: float = 15000,
+    pierce_shadow: bool = True,
+    poll_interval: float = 500,
+    frame_name: str = None,
+    frame_url: str = None,
+) -> dict:
+    """Wait until the given text appears anywhere on the page (Issue #22).
+
+    This tool is SPA-safe: it polls the DOM for the target text substring to
+    appear, handling cases where URL/navigation events don't trigger (e.g.
+    React/Vue/Angular multi-step forms that swap content via internal state).
+
+    Features:
+    - Polls at configurable intervals (default 500ms per spec)
+    - Searches across Shadow DOM boundaries (OPEN shadow roots)
+    - Returns element info (tag, id) for the first matching element
+    - Works within iframes via frame_name/frame_url parameters
+
+    Args:
+        text: The text substring to wait for in the page content.
+        timeout: Maximum time to wait in milliseconds (default 15000ms).
+        pierce_shadow: Also scan text inside OPEN shadow roots (default True).
+        poll_interval: Polling interval in milliseconds (default 500ms).
+        frame_name: Optional - watch inside a named iframe.
+        frame_url: Optional - watch inside an iframe matching this URL substring.
+
+    Returns:
+        On success: {"found": True, "text": ..., "element": {tag, id, ...}, "method": ...}
+        On timeout: {"found": False, "text": ..., "error": "timeout"}
+
+    Example:
+        # Wait for SPA step 2 content to appear after clicking "Continue"
+        await browser_click("Continue")
+        result = await browser_wait_for_text("Step 2: Select your preferences")
+        if result["found"]:
+            print(f"Found in element: {result['element']}")
+    """
+    # Lazy import to avoid circular import at module load
+    from sin_browser_tools.tools.frames import _resolve_frame
+
+    frame, error = _resolve_frame(frame_name, frame_url)
+    if error:
+        return {"found": False, "text": text, "error": error}
+
+    args = {
+        "targetText": text,
+        "timeoutMs": max(0, int(timeout)),
+        "pierceShadow": bool(pierce_shadow),
+        "pollIntervalMs": max(100, int(poll_interval)),  # minimum 100ms
+    }
+
     try:
-        await manager.page.wait_for_function(
-            "t => document.body && document.body.innerText.includes(t)",
-            arg=text,
-            timeout=timeout,
-        )
-        return {"status": "found", "text": text}
+        result = await frame.evaluate(_WAIT_FOR_TEXT_JS, args)
     except Exception as e:
-        return {"status": "timeout", "text": text, "error": str(e)}
+        return {"found": False, "text": text, "error": str(e)}
+
+    if result.get("found"):
+        return {
+            "found": True,
+            "text": text,
+            "element": result.get("element"),
+            "matchCount": result.get("matchCount", 0),
+            "method": result.get("method"),
+        }
+    return {
+        "found": False,
+        "text": text,
+        "error": f"Text '{text}' did not appear within {timeout}ms",
+        "method": result.get("method"),
+    }
 
 
 async def browser_wait_for_load(state: str = "networkidle", timeout: float = 15000) -> dict:

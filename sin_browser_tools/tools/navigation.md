@@ -21,11 +21,69 @@ management.
 | Tool | Signature | Description |
 | --- | --- | --- |
 | `browser_wait_for` | `(selector, state="visible", timeout=10000)` | Wait for selector state (`attached`/`detached`/`visible`/`hidden`). |
-| `browser_wait_for_text` | `(text, timeout=10000)` | Wait until text appears anywhere on the page. |
+| `browser_wait_for_text` | `(text, timeout=15000, pierce_shadow=True, poll_interval=500)` | Wait until text appears anywhere on the page (SPA-safe, Shadow DOM support). |
 | `browser_wait_for_load` | `(state="networkidle", timeout=15000)` | Wait for `load`/`domcontentloaded`/`networkidle`. |
+| `browser_wait_for_spa_transition` | `(target_text, timeout_ms=30000, pierce_shadow=True)` | MutationObserver-based instant detection when text appears in DOM. |
 
-All waiters return `{"status": "timeout", ...}` instead of throwing, so an agent
+All waiters return `{"status": "timeout", ...}` or `{"found": false, ...}` instead of throwing, so an agent
 can branch on the result.
+
+### `browser_wait_for_text` (Issue #22)
+
+This tool is designed for SPA multi-step content where URL/navigation events don't trigger:
+
+**Features:**
+- Polls at 500ms intervals (configurable via `poll_interval`)
+- Searches across Shadow DOM boundaries (OPEN shadow roots)
+- Returns element info (tag, id, className) for the first matching element
+- Timeout with clear error message
+- Works within iframes via `frame_name`/`frame_url` parameters
+
+**Parameters:**
+- `text` (required): The text substring to wait for
+- `timeout`: Max wait time in ms (default: 15000)
+- `pierce_shadow`: Search inside open Shadow DOM roots (default: True)
+- `poll_interval`: Polling frequency in ms (default: 500)
+- `frame_name`: Optional iframe name to search within
+- `frame_url`: Optional iframe URL substring to match
+
+**Return value:**
+```json
+{
+  "found": true,
+  "text": "Step 2: Select preferences",
+  "element": {
+    "tag": "h2",
+    "id": "step-title",
+    "className": "title",
+    "text": "Step 2: Select preferences"
+  },
+  "matchCount": 1,
+  "method": "poll"
+}
+```
+
+**Example use case (Fireworks onboarding):**
+```python
+# Step 1: Fill form and click Continue
+await browser_fill("#email", "user@example.com")
+await browser_click("Continue")
+
+# Step 2: Wait for SPA content to swap (no URL change!)
+result = await browser_wait_for_text("Step 2: Select your preferences")
+if result["found"]:
+    # Now interact with step 2 content
+    await browser_click_checkbox_react("I agree to terms")
+```
+
+### `browser_wait_for_spa_transition` vs `browser_wait_for_text`
+
+| Feature | `browser_wait_for_text` | `browser_wait_for_spa_transition` |
+| --- | --- | --- |
+| Detection method | Polling (500ms default) | MutationObserver (instant) |
+| Element info returned | Yes (tag, id, className) | No |
+| Best for | Need element info, slower transitions | Instant detection, fast SPAs |
+| Shadow DOM | Yes (open roots) | Yes (open roots) |
 
 ## Tabs / windows
 
