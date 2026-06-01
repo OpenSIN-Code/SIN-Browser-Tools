@@ -21,6 +21,174 @@ checking, file upload. **Contains the OOPIF-safe click routing.**
 
 `target` is either a ref-id (`@eN`) from a snapshot or a CSS/text selector.
 
+### `browser_click(target, button="left", force=False, timeout=30000)`
+
+Click an element on the page. Auto-routes CDP descriptors via the OOPIF-safe
+two-strategy approach; plain selectors use Playwright's `.click()`.
+
+**Arguments:**
+- `target` (str): ref-id (`@eN`), CSS selector, or text selector (`:text("Label")`)
+- `button` (str, optional): `"left"`, `"right"`, or `"middle"` (default `"left"`)
+- `force` (bool, optional): Skip scroll-into-view checks (default `False`)
+- `timeout` (int, optional): Milliseconds to wait for element (default 30000)
+
+**Returns:**
+
+Clicked via Playwright locator (best path):
+```json
+{"status": "ok", "element": {"tag": "button", "id": "submit", "text": "Submit"}}
+```
+
+Clicked via CDP two-strategy fallback:
+```json
+{"status": "clicked_locator", "element": {...}}
+```
+or
+```json
+{"status": "clicked_cdp", "element": {...}}
+```
+
+Error (missing selector):
+```json
+{"status": "error", "error": "No element matches selector: .not-there"}
+```
+
+Timeout:
+```json
+{"status": "error", "error": "Timeout waiting for selector (30000ms)"}
+```
+
+**Example:**
+```python
+# Click by CSS selector
+result = await browser_click("button.submit")
+if result["status"] == "ok":
+    print("Clicked successfully")
+elif "error" in result:
+    print(f"Click failed: {result['error']}")
+
+# Click by text (any button containing "Delete")
+await browser_click(":text('Delete')")
+
+# Right-click for context menu
+await browser_click("button", button="right")
+```
+
+### `browser_double_click(target, timeout=30000)`
+
+Double-click an element.
+
+**Returns:** Same as `browser_click` (status `ok`, `clicked_locator`, `clicked_cdp`, or `error`)
+
+### `browser_right_click(target, timeout=30000)`
+
+Right-click an element (show context menu).
+
+**Returns:** Same as `browser_click`
+
+### `browser_hover(target, timeout=30000)`
+
+Hover over an element (triggers `:hover` CSS and can reveal tooltips/menus).
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "button", "text": "Hover me"}}
+```
+
+### `browser_fill(target, value)`
+
+**Alias for `browser_type(target, value, clear=True)`** — clear the field and type.
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "input", "id": "email"}}
+```
+
+### `browser_type(target, text, clear=True, timeout=30000)`
+
+Type text into a form field.
+
+**Arguments:**
+- `target` (str): ref-id or selector
+- `text` (str): Text to type
+- `clear` (bool, optional): Clear the field first (default `True`)
+- `timeout` (int, optional): Milliseconds to wait (default 30000)
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "input", "type": "text", "id": "search"}}
+```
+
+### `browser_check(target, checked=True, timeout=30000)`
+
+Check or uncheck a checkbox/radio button.
+
+**Arguments:**
+- `target` (str): ref-id or selector
+- `checked` (bool, optional): Whether to check (True) or uncheck (False) (default `True`)
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "input", "type": "checkbox", "checked": true}}
+```
+
+### `browser_select_option(target, value=None, label=None, timeout=30000)`
+
+Select an option from a native `<select>` element.
+
+**Arguments:**
+- `target` (str): ref-id or selector (CSS selectors only, not CDP refs)
+- `value` (str, optional): Option `value` attribute to select
+- `label` (str, optional): Option text (label) to select; if both `value` and `label` are given, `value` wins
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "select", "id": "country", "value": "US"}}
+```
+
+Error (not a select):
+```json
+{"status": "error", "error": "Element is not a <select>"}
+```
+
+### `browser_drag(source, target, timeout=30000)`
+
+Drag from `source` element to `target` element.
+
+**Arguments:**
+- `source` (str): ref-id or selector (starting position)
+- `target` (str): ref-id or selector (ending position)
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "div", "id": "draggable"}}
+```
+
+### `browser_upload_file(target, file_path, timeout=30000)`
+
+Upload a file to an `<input type="file">` element.
+
+**Arguments:**
+- `target` (str): CSS selector or ref-id (selectors preferred over CDP refs)
+- `file_path` (str): Absolute file path
+
+**Returns:**
+
+```json
+{"status": "ok", "element": {"tag": "input", "type": "file", "value": "/path/to/file.txt"}}
+```
+
+Error:
+```json
+{"status": "error", "error": "File not found: /path/to/file.txt"}
+```
+
 ## Two-strategy click (the important part)
 
 `browser_click_cdp` handles refs that resolve to a **CDP descriptor** (OOPIF /

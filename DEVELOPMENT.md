@@ -1,5 +1,11 @@
 # Development Guide
 
+## Quick Links
+
+- **Adding a new tool?** See [docs/TOOL_DEVELOPMENT.md](docs/TOOL_DEVELOPMENT.md) for best practices on return contracts, documentation, and testing.
+- **Contributing fixes?** See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request process and backwards compatibility rules.
+- **Learning the codebase?** See [ARCHITECTURE.md](ARCHITECTURE.md) for system design and [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) for agent best practices.
+
 ## Local Setup
 
 ```bash
@@ -51,7 +57,13 @@ sin_browser_tools/
 
 ### Add New Tool
 
-Create function in tools/<category>.py, register in opensin_skill.py
+1. Create function in tools/<category>.py, register in opensin_skill.py
+2. **Document the return contract** in tools/<category>.md (see [TOOL_DEVELOPMENT.md](docs/TOOL_DEVELOPMENT.md))
+3. Add smoke tests in tests/test_tool_smoke.py
+4. Update tool count in README.md
+
+For detailed best practices, see [docs/TOOL_DEVELOPMENT.md](docs/TOOL_DEVELOPMENT.md) — covers
+return contracts, documentation patterns, stability rules (Issue #28), and testing patterns.
 
 ### Connect Remote Chrome
 

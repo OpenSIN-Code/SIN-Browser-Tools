@@ -17,6 +17,182 @@ HTML, links, attributes, and web storage.
 | `browser_get_attribute` | `(selector, name)` | Read one attribute of an element. |
 | `browser_storage` | `(area="local", action="get", key?, value?)` | Read/write `localStorage`/`sessionStorage`. |
 
+### `browser_console(expression)`
+
+Evaluate a JavaScript expression on the current page and return the stringified result.
+
+**Arguments:**
+- `expression` (str): JavaScript code to evaluate (e.g., `"document.title"`)
+
+**Returns:**
+
+Success:
+```json
+{"result": "Hello World", "type": "str"}
+```
+
+Error:
+```json
+{"error": "document.missing is not defined"}
+```
+
+**Example:**
+```python
+result = await browser_console("document.body.children.length")
+if "result" in result:
+    print(f"Found {result['result']} child elements")
+else:
+    print(f"Error: {result['error']}")
+```
+
+### `browser_get_cookies(url=None)`
+
+Get cookies from the current browser context, optionally filtered by URL.
+
+**Arguments:**
+- `url` (str, optional): Filter cookies by this URL (domain/path match)
+
+**Returns:**
+
+```json
+{"count": 3, "cookies": [
+  {"name": "session_id", "value": "abc123", "domain": ".example.com", "path": "/"},
+  {"name": "pref", "value": "dark_mode", "domain": ".example.com", "path": "/"}
+]}
+```
+
+Empty cookies:
+```json
+{"count": 0, "cookies": []}
+```
+
+### `browser_set_cookie(name, value, url=None, domain=None, path="/")`
+
+Set a cookie in the current browser context.
+
+**Arguments:**
+- `name` (str): Cookie name
+- `value` (str): Cookie value
+- `url` (str, optional): Scope by this URL (default: current page URL)
+- `domain` (str, optional): Scope by this domain (e.g., `.example.com`); if set, ignores `url`
+- `path` (str, optional): Cookie path (default `"/"`)
+
+**Returns:**
+
+```json
+{"status": "set", "name": "my_cookie"}
+```
+
+Error:
+```json
+{"error": "Invalid domain or url"}
+```
+
+### `browser_clear_cookies()`
+
+Clear all cookies from the current browser context.
+
+**Returns:**
+
+```json
+{"status": "cleared"}
+```
+
+### `browser_get_html(selector=None, max_length=200000)`
+
+Get the raw HTML of the page or a specific element.
+
+**Arguments:**
+- `selector` (str, optional): CSS selector to get HTML of a specific element; if None, gets entire page
+- `max_length` (int, optional): Maximum HTML length before truncation (default 200000)
+
+**Returns:**
+
+Full content:
+```json
+{"html": "<html>...</html>"}
+```
+
+Truncated:
+```json
+{"html": "<html>...[truncated]", "truncated": true}
+```
+
+### `browser_get_links()`
+
+Extract all links (`<a>` tags) from the page with text, href, title, and visibility.
+
+**Returns:**
+
+```json
+{"links": [
+  {"text": "Home", "href": "https://example.com/", "title": "Home page", "visible": true},
+  {"text": "About", "href": "https://example.com/about", "title": "", "visible": false}
+]}
+```
+
+### `browser_get_attribute(selector, name)`
+
+Read a single attribute of an element.
+
+**Arguments:**
+- `selector` (str): CSS selector
+- `name` (str): Attribute name (e.g., `"data-id"`, `"href"`)
+
+**Returns:**
+
+Found:
+```json
+{"result": "value123", "type": "str"}
+```
+
+Missing element:
+```json
+{"error": "No element matches selector: .not-there"}
+```
+
+### `browser_storage(area="local", action="get", key=None, value=None)`
+
+Read/write browser `localStorage` or `sessionStorage`.
+
+**Arguments:**
+- `area` (str): `"local"` or `"session"` (default `"local"`)
+- `action` (str): `"get"`, `"set"`, `"remove"`, or `"clear"`
+- `key` (str, optional): Storage key (required for `set`/`remove`)
+- `value` (str, optional): Storage value (required for `set`)
+
+**Returns:**
+
+Get all:
+```json
+{"method": "get", "result": {"user_id": "123", "theme": "dark"}}
+```
+
+Get one key:
+```json
+{"method": "get", "result": "dark"}
+```
+
+Set:
+```json
+{"method": "set", "result": "value stored"}
+```
+
+Remove:
+```json
+{"method": "remove", "result": "key removed"}
+```
+
+Clear:
+```json
+{"method": "clear", "result": "storage cleared"}
+```
+
+Error:
+```json
+{"error": "Invalid area: 'cookies'", "method": "get"}
+```
+
 ## `browser_set_cookie` scoping rule
 Playwright scopes a cookie **either** by `url` **or** by the `domain`+`path`
 pair — never a mix. This tool enforces that: pass `domain` (with optional
