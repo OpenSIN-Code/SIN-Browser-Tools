@@ -86,6 +86,156 @@ async def browser_wait_for_load(state: str = "networkidle", timeout: float = 150
         return {"status": "timeout", "state": state, "error": str(e)}
 
 
+# ---------------------------------------------------------------------------
+# browser_wait_for_spa_transition -- MutationObserver-based DOM-text waiter
+# (Issue #23).
+#
+# Why a dedicated tool (vs. browser_wait_for_text):
+#   React/Vue/Angular SPAs change the rendered step WITHOUT changing the URL or
+#   firing a navigation/load event -- e.g. a multi-step onboarding form where
+#   clicking "Continue" swaps step 1 for step 2 in place. wait_for_load /
+#   networkidle never fire, so the only reliable signal is "did this text appear
+#   in the DOM yet?". This tool installs a MutationObserver inside the page (or a
+#   named/URL-matched frame), so it resolves the instant the target text is
+#   inserted -- including text rendered into OPEN shadow roots -- instead of
+#   polling on a fixed interval.
+#
+# Ported and hardened from SINator-FireworksAI agent_toolbox/core/browser_utils
+# (wait_for_spa_transition), which used the same MutationObserver approach for
+# the Fireworks onboarding 2-step SPA.
+# ---------------------------------------------------------------------------
+
+_SPA_TRANSITION_JS = r"""
+(args) => {
+  const { targetText, timeoutMs, pierceShadow } = args;
+  const needle = targetText;
+
+  // Read visible text across the document AND any OPEN shadow roots, because
+  // web-component SPAs render step content inside shadow DOM where
+  // document.body.innerText cannot see it.
+  const collectText = () => {
+    let text = (document.body && document.body.innerText) || '';
+    if (pierceShadow && document.body) {
+      const stack = [document.body];
+      while (stack.length) {
+        const node = stack.pop();
+        let kids;
+        try { kids = node.querySelectorAll('*'); } catch (e) { continue; }
+        kids.forEach((el) => {
+          if (el.shadowRoot && el.shadowRoot.mode === 'open') {
+            text += ' ' + (el.shadowRoot.textContent || '');
+            stack.push(el.shadowRoot);
+          }
+        });
+      }
+    }
+    return text;
+  };
+
+  const hit = () => collectText().includes(needle);
+
+  return new Promise((resolve) => {
+    if (hit()) { resolve({ found: true, method: 'immediate' }); return; }
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try { observer.disconnect(); } catch (e) {}
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const observer = new MutationObserver(() => {
+      if (hit()) finish({ found: true, method: 'observer' });
+    });
+    try {
+      observer.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    } catch (e) {
+      finish({ found: hit(), method: 'observe_failed' });
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      finish({ found: hit(), method: hit() ? 'timeout_check' : 'timeout' });
+    }, timeoutMs);
+  });
+}
+"""
+
+
+async def browser_wait_for_spa_transition(
+    target_text: str,
+    timeout_ms: int = 30000,
+    pierce_shadow: bool = True,
+    frame_name: str = None,
+    frame_url: str = None,
+) -> dict:
+    """Wait for an SPA DOM transition by watching for ``target_text`` to appear
+    via a MutationObserver (Issue #23).
+
+    Use this when a React/Vue/Angular app swaps content WITHOUT a navigation or
+    URL change -- e.g. a multi-step onboarding form where "Continue" replaces
+    step 1 with step 2 in place. ``browser_wait_for_load`` / networkidle never
+    fire for those; this tool resolves the instant ``target_text`` is inserted
+    into the DOM (open shadow roots included), so you can call it right after a
+    click instead of sleeping a fixed amount.
+
+    Args:
+        target_text: substring to wait for in the rendered text.
+        timeout_ms: max time to wait before giving up (default 30s).
+        pierce_shadow: also scan text inside OPEN shadow roots (default True;
+            needed for web-component SPAs).
+        frame_name / frame_url: watch inside a named/URL-matched iframe instead
+            of the main frame (same semantics as the ``browser_*_in_frame``
+            tools).
+
+    Returns:
+        ``{"status": "found", "method": ..., "target_text": ...}`` once the text
+        appears, or ``{"status": "timeout", "target_text": ..., ...}`` if it
+        never did within ``timeout_ms``. ``method`` is one of ``immediate`` /
+        ``observer`` / ``timeout_check`` and is handy for debugging flaky steps.
+    """
+    # Lazy import to avoid a circular import at module load
+    # (frames -> manager, navigation -> manager).
+    from sin_browser_tools.tools.frames import _resolve_frame
+
+    frame, error = _resolve_frame(frame_name, frame_url)
+    if error:
+        return {"status": "error", "target_text": target_text, "error": error}
+
+    args = {
+        "targetText": target_text,
+        "timeoutMs": max(0, int(timeout_ms)),
+        "pierceShadow": bool(pierce_shadow),
+    }
+    try:
+        result = await frame.evaluate(_SPA_TRANSITION_JS, args)
+    except Exception as e:
+        return {"status": "timeout", "target_text": target_text, "error": str(e)}
+
+    if result.get("found"):
+        return {
+            "status": "found",
+            "method": result.get("method"),
+            "target_text": target_text,
+        }
+    return {
+        "status": "timeout",
+        "method": result.get("method"),
+        "target_text": target_text,
+        "error": (
+            f"Text {target_text!r} did not appear within {timeout_ms}ms. The SPA "
+            "step may not have advanced, the text may differ, or it may live in "
+            "a closed shadow root."
+        ),
+    }
+
+
 # --- Tab / window management -------------------------------------------------
 
 async def browser_list_tabs() -> dict:

@@ -490,6 +490,179 @@ async def test_checkbox_by_text_missing_label_times_out(live_manager):
 
 
 # ---------------------------------------------------------------------------
+# browser_fill_react — React-controlled input fill (Issue #24)
+#
+# A controlled React input is simulated with an input whose oninput handler is
+# the ONLY thing that updates the "model" (window.__model). A plain value
+# assignment would not fire oninput, so __model would stay empty -- exactly the
+# bug this tool fixes by writing through the native setter AND dispatching a
+# bubbling 'input' event.
+# ---------------------------------------------------------------------------
+
+_REACT_INPUT_HTML = """<!doctype html><html><body>
+<input id="email" name="email" type="text" />
+<textarea id="bio" name="bio"></textarea>
+<script>
+  window.__model = '';
+  window.__inputEvents = 0;
+  window.__bioModel = '';
+  const email = document.getElementById('email');
+  email.addEventListener('input', (e) => {
+    window.__inputEvents += 1;
+    window.__model = e.target.value;  // "state" only updates via the event
+  });
+  document.getElementById('bio').addEventListener('input', (e) => {
+    window.__bioModel = e.target.value;
+  });
+</script>
+</body></html>"""
+
+
+async def test_fill_react_fires_oninput_and_updates_model(live_manager):
+    await live_manager.page.set_content(_REACT_INPUT_HTML)
+    res = await interaction.browser_fill_react('input[name="email"]', "a@b.com")
+    assert res["success"] is True
+    assert res["value"] == "a@b.com"
+    # The model only updates if a bubbling 'input' event actually fired.
+    model = await live_manager.page.evaluate("() => window.__model")
+    events = await live_manager.page.evaluate("() => window.__inputEvents")
+    assert model == "a@b.com"
+    assert events >= 1
+
+
+async def test_fill_react_handles_textarea(live_manager):
+    await live_manager.page.set_content(_REACT_INPUT_HTML)
+    res = await interaction.browser_fill_react("#bio", "hello world")
+    assert res["success"] is True
+    bio_model = await live_manager.page.evaluate("() => window.__bioModel")
+    assert bio_model == "hello world"
+
+
+async def test_fill_react_missing_selector_returns_error(live_manager):
+    await live_manager.page.set_content(_REACT_INPUT_HTML)
+    res = await interaction.browser_fill_react("#does-not-exist", "x")
+    assert res["success"] is False
+    assert "error" in res
+
+
+# ---------------------------------------------------------------------------
+# browser_click_checkbox_react — checkbox click that avoids the <a> trap
+# (Issue #25)
+# ---------------------------------------------------------------------------
+
+# Label embeds a <a> link to the ToS but the real control is reachable via
+# <label for=ID> -> #agree. Clicking the label/text would follow the link;
+# the tool must resolve and toggle the input instead.
+_TOS_LINKED_HTML = """<!doctype html><html><body>
+<input id="agree" type="checkbox" />
+<label for="agree">I agree to the
+  <a href="https://example.com/tos">Terms of Service</a>
+</label>
+</body></html>"""
+
+# Pure trap: the only thing carrying the label text is a <label> wrapping an
+# <a>, with NO resolvable checkbox control -> tool must refuse to click.
+_TOS_TRAP_ONLY_HTML = """<!doctype html><html><body>
+<label>I agree to the <a href="https://example.com/tos">Terms of Service</a></label>
+</body></html>"""
+
+
+async def test_checkbox_react_resolves_via_label_for_not_link(live_manager):
+    await live_manager.page.set_content(_TOS_LINKED_HTML)
+    res = await interaction.browser_click_checkbox_react("I agree to the")
+    assert res["success"] is True
+    assert res["clicked"] is True
+    assert res["method"] == "label_for"
+    assert res["link_trap"] is True  # a link WAS present, but we avoided it
+    checked = await live_manager.page.eval_on_selector("#agree", "el => el.checked")
+    assert checked is True
+    # We must NOT have navigated to the ToS page.
+    assert "example.com/tos" not in live_manager.page.url
+
+
+async def test_checkbox_react_refuses_pure_link_trap(live_manager):
+    await live_manager.page.set_content(_TOS_TRAP_ONLY_HTML)
+    res = await interaction.browser_click_checkbox_react("I agree to the")
+    assert res["success"] is False
+    assert res["link_trap"] is True
+    assert res.get("clicked") is False
+    assert "example.com/tos" not in live_manager.page.url
+
+
+async def test_checkbox_react_custom_shadow_checkbox(live_manager):
+    # Still works for the Issue #21 shadow-DOM checkbox (no link involved).
+    res = await interaction.browser_click_checkbox_react("Prototype with open models")
+    assert res["success"] is True
+    assert res["state_before"] == "false"
+    assert res["state_after"] == "true"
+
+
+async def test_checkbox_react_missing_label_times_out(live_manager):
+    res = await interaction.browser_click_checkbox_react(
+        "no such checkbox label", timeout_ms=600
+    )
+    assert res["success"] is False
+    assert res["method"] is None
+    assert "error" in res
+
+
+# ---------------------------------------------------------------------------
+# browser_wait_for_spa_transition — MutationObserver DOM-text waiter (Issue #23)
+# ---------------------------------------------------------------------------
+
+async def test_spa_transition_immediate_when_text_present(live_manager):
+    # Fixture already shows "Smoke Test Page" -> resolves without observing.
+    res = await navigation.browser_wait_for_spa_transition(
+        "Smoke Test Page", timeout_ms=2000
+    )
+    assert res["status"] == "found"
+    assert res["method"] == "immediate"
+
+
+async def test_spa_transition_detects_async_dom_swap(live_manager):
+    # Simulate an in-place SPA step change (no navigation / no URL change).
+    await live_manager.page.set_content(
+        """<!doctype html><html><body><div id="app">Step 1</div>
+        <script>
+          setTimeout(() => {
+            document.getElementById('app').textContent = 'Step 2 of 2';
+          }, 400);
+        </script></body></html>"""
+    )
+    res = await navigation.browser_wait_for_spa_transition(
+        "Step 2 of 2", timeout_ms=4000
+    )
+    assert res["status"] == "found"
+    assert res["method"] in ("observer", "timeout_check")
+
+
+async def test_spa_transition_pierces_open_shadow_dom(live_manager):
+    await live_manager.page.set_content(
+        """<!doctype html><html><body><spa-step></spa-step>
+        <script>
+          customElements.define('spa-step', class extends HTMLElement {
+            constructor(){ super(); const r=this.attachShadow({mode:'open'});
+              r.innerHTML='<div>loading</div>';
+              setTimeout(()=>{ r.querySelector('div').textContent='Welcome aboard'; }, 300);
+            }
+          });
+        </script></body></html>"""
+    )
+    res = await navigation.browser_wait_for_spa_transition(
+        "Welcome aboard", timeout_ms=4000, pierce_shadow=True
+    )
+    assert res["status"] == "found"
+
+
+async def test_spa_transition_times_out_gracefully(live_manager):
+    res = await navigation.browser_wait_for_spa_transition(
+        "text that never appears", timeout_ms=500
+    )
+    assert res["status"] == "timeout"
+    assert "error" in res
+
+
+# ---------------------------------------------------------------------------
 # set_active_page validation (Issue #14)
 # ---------------------------------------------------------------------------
 
