@@ -10,6 +10,31 @@ All notable changes to SIN-Browser-Tools.
   - Element info return: Returns tag, id, className of first matching element
   - Configurable polling: 500ms default interval (per spec), adjustable via `poll_interval`
   - Frame support: `frame_name` and `frame_url` parameters for iframe targeting
+  - Clear timeout errors with method tracking
+- **Window Control** (Issue #27 F1):
+  - `browser_get_window_bounds` - Read window position/size/state
+  - `browser_set_window_bounds` - Set exact pixel bounds
+  - `browser_set_window_mode` - Preset sizes (small/medium/large/maximized/fullscreen)
+  - `browser_maximize_window`, `browser_minimize_window`, `browser_fullscreen_window`, `browser_restore_window`
+  - `browser_move_window` - Position window on screen
+  - New `core/window.py` with CDP-based `WindowController`
+- **macOS Spaces Control** (Issue #27 F2):
+  - `browser_list_spaces` - List all virtual desktops
+  - `browser_create_space` - Create new Space
+  - `browser_move_to_space` - Move browser to specific Space
+  - `browser_get_window_space` - Query current Space
+  - `browser_send_to_background_space` - Auto-find/create background Space
+  - New `core/spaces.py` with Hammerspoon/yabai/AppleScript backends
+- Documentation: `WINDOW_AND_SPACES.md`, `PERMISSIONS_MACOS.md`
+
+## [Unreleased]
+
+### Added
+- **browser_wait_for_text enhancements** (Issue #22):
+  - Shadow DOM support: Searches across OPEN shadow roots
+  - Element info return: Returns tag, id, className of first matching element
+  - Configurable polling: 500ms default interval (per spec), adjustable via `poll_interval`
+  - Frame support: `frame_name` and `frame_url` parameters for iframe targeting
   - Clear timeout errors with method info (`immediate`/`poll`/`timeout`)
 - Updated `navigation.md` documentation with complete API reference for wait tools
 
