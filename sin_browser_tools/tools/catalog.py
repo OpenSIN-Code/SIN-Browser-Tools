@@ -16,6 +16,8 @@ from sin_browser_tools.tools import (
     interaction,
     navigation,
     vision,
+    learning,
+    screen_record,
 )
 
 # Order matters only for stable, readable listings.
@@ -27,6 +29,8 @@ TOOL_MODULES = [
     vision,
     dialog,
     frames,
+    learning,
+    screen_record,
 ]
 
 _PY_TO_JSON = {

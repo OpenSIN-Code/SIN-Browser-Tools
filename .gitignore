@@ -14,3 +14,7 @@ venv/
 *.swp
 .idea/
 .vscode/
+.sin_recordings/
+.sin_playbooks/
+.sin_vault/
+.sin_traces/
