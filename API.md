@@ -37,6 +37,7 @@ self-describing catalog with parameter schemas.
 - `browser_drag(source, target)` - Drag and drop
 - `browser_select_option(target, value, label)` - Select a `<select>` option
 - `browser_check(target, checked: bool)` - Check / uncheck a control
+- `browser_click_checkbox_by_text(label_text, exact, frame_name, frame_url)` - Click a checkbox by its visible label, pierces shadow DOM, SPA-safe (Issue #21)
 - `browser_type(target, text, clear: bool)` - Type text
 - `browser_fill(target, value)` - Clear + fill an input
 - `browser_upload_file(target, file_path)` - Upload a file
@@ -62,10 +63,11 @@ self-describing catalog with parameter schemas.
 - `browser_dialog(action: str, prompt_text: str)` - Handle a JS dialog
 - `browser_wait_for_dialog(timeout: float)` - Wait for a dialog
 
-## Frames (Issue #11, #15)
+## Frames (Issue #11, #12, #15)
 - `browser_list_frames()` - List all frames (main, OOPIFs, same-process)
 - `browser_eval_in_frame(expr: str, frame_name: str, frame_url: str)` - Run JS in specific frame
 - `browser_snapshot_in_frame(frame_name, frame_url, selector, pierce_shadow)` - Walk frame DOM, pierce open shadow roots
+- `browser_click_in_frame(selector, frame_name, frame_url, index, text)` - Click a (shadow-DOM) element inside one frame, e.g. GMX/web.de mail rows (Issue #12)
 - `browser_scan_frames(pattern, regex, include_empty)` - Scan ALL frames for text content (unnamed iframe support)
 
 See README for usage examples.

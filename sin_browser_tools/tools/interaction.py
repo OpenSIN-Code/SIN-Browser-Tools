@@ -481,6 +481,251 @@ async def browser_click_by_text(
         ) from e
 
 
+# ---------------------------------------------------------------------------
+# browser_click_checkbox_by_text — click a checkbox by its visible label,
+# piercing shadow DOM, SPA-safe (Issue #21).
+#
+# Real-world target (Fireworks onboarding, many React apps): the "checkbox" is
+# NOT an <input type="checkbox"> or <label>. It's a custom <div>/<span> with a
+# click handler, often inside a web component's shadow DOM, and it only appears
+# after a prior step ("Continue") in a multi-step SPA form.
+#
+# Strategy (mirrors the issue's acceptance criteria), all inside ONE injected
+# walker so shadow boundaries are crossed consistently:
+#   1. find the element whose own/descendant text contains label_text (open
+#      shadow roots included, any depth),
+#   2. resolve the actual control to click, in priority order:
+#        a) <label for=ID>  -> the #ID input
+#        b) an <input type=checkbox|radio> inside the matched container
+#        c) a [role=checkbox] inside / at the matched element
+#        d) the text element itself (custom div/span acting as a checkbox),
+#   3. click it in-page (works for custom handlers AND native inputs).
+# ---------------------------------------------------------------------------
+
+_CHECKBOX_BY_TEXT_JS = r"""
+(args) => {
+  const { label, exact, maxDepth } = args;
+  const needle = label.trim().toLowerCase();
+
+  // Collect every element across open shadow roots (depth-first).
+  const all = [];
+  const collect = (root, depth) => {
+    if (!root || depth > maxDepth) return;
+    let els;
+    try { els = root.querySelectorAll('*'); } catch (e) { return; }
+    els.forEach((el) => {
+      all.push(el);
+      if (el.shadowRoot && el.shadowRoot.mode === 'open') {
+        collect(el.shadowRoot, depth + 1);
+      }
+    });
+  };
+  if (document.body) collect(document.body, 0);
+
+  const ownText = (el) => {
+    // Prefer the element's directly-rendered text; fall back to open shadow.
+    let t = (el.innerText || el.textContent || '');
+    if (!t.trim() && el.shadowRoot && el.shadowRoot.mode === 'open') {
+      t = el.shadowRoot.textContent || '';
+    }
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  const matches = (el) => {
+    const t = ownText(el).toLowerCase();
+    if (!t) return false;
+    return exact ? t === needle : t.includes(needle);
+  };
+
+  // Smallest matching element = the tightest label wrapper (avoids matching the
+  // whole form/body just because it contains the text somewhere).
+  // `all` is in DFS order, so a shadow host is seen BEFORE the elements inside
+  // its shadow root. When the host and an inner element have equally-short text
+  // (e.g. <fancy-checkbox> wrapping a single <div role=checkbox>), prefer the
+  // deeper one (<=) -- that is the actual control, and querySelector on a host
+  // cannot reach into its own shadow root.
+  let best = null;
+  let bestLen = Infinity;
+  for (const el of all) {
+    if (!matches(el)) continue;
+    const len = ownText(el).length;
+    if (len <= bestLen) { best = el; bestLen = len; }
+  }
+  if (!best) return { found: false };
+
+  const rootOf = (node) => node.getRootNode ? node.getRootNode() : document;
+  // querySelector that also looks inside the element's OWN open shadow root.
+  const queryDeep = (el, sel) => {
+    if (!el.querySelector) return null;
+    return el.querySelector(sel) ||
+      (el.shadowRoot ? el.shadowRoot.querySelector(sel) : null);
+  };
+
+  // Resolve the control to click.
+  let target = null;
+  let method = null;
+
+  // (a) <label for=ID> -> #ID
+  const labelEl = best.closest ? (best.closest('label') || (best.tagName === 'LABEL' ? best : null)) : null;
+  if (labelEl && labelEl.htmlFor) {
+    const root = rootOf(labelEl);
+    const ctrl = root.getElementById
+      ? root.getElementById(labelEl.htmlFor)
+      : document.getElementById(labelEl.htmlFor);
+    if (ctrl) { target = ctrl; method = 'label_for'; }
+  }
+
+  // (b) input[type=checkbox|radio] inside the matched container (or its shadow)
+  if (!target) {
+    const input = queryDeep(best, 'input[type=checkbox], input[type=radio]');
+    if (input) { target = input; method = 'descendant_input'; }
+  }
+
+  // (c) [role=checkbox] at / inside the matched element (or its shadow)
+  if (!target) {
+    if (best.getAttribute && best.getAttribute('role') === 'checkbox') {
+      target = best; method = 'role_checkbox_self';
+    } else {
+      const roleEl = queryDeep(best, '[role=checkbox]');
+      if (roleEl) { target = roleEl; method = 'role_checkbox_descendant'; }
+    }
+  }
+
+  // (d) the text element itself (custom div/span checkbox)
+  if (!target) { target = best; method = 'text_element'; }
+
+  // Scroll into view + click in-page (fires custom React/web-component handlers
+  // and toggles native inputs alike).
+  try { target.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+  const readState = (el) =>
+    (el.getAttribute && el.getAttribute('aria-checked')) ||
+    (typeof el.checked === 'boolean' ? String(el.checked) : null);
+  const before = readState(target);
+  target.click();
+  const after = readState(target);
+
+  return {
+    found: true,
+    method,
+    element:
+      (target.tagName ? target.tagName.toLowerCase() : '(unknown)') +
+      (target.id ? '#' + target.id : '') +
+      (target.type ? '[type=' + target.type + ']' : ''),
+    matched_text: ownText(best).slice(0, 120),
+    state_before: before,
+    state_after: after,
+  };
+}
+"""
+
+_CHECKBOX_PRESENT_JS = r"""
+(args) => {
+  const needle = args.label.trim().toLowerCase();
+  const all = [];
+  const collect = (root, depth) => {
+    if (!root || depth > args.maxDepth) return;
+    let els; try { els = root.querySelectorAll('*'); } catch (e) { return; }
+    els.forEach((el) => {
+      all.push(el);
+      if (el.shadowRoot && el.shadowRoot.mode === 'open') collect(el.shadowRoot, depth + 1);
+    });
+  };
+  if (document.body) collect(document.body, 0);
+  return all.some((el) => {
+    let t = (el.innerText || el.textContent || '');
+    if (!t.trim() && el.shadowRoot && el.shadowRoot.mode === 'open') t = el.shadowRoot.textContent || '';
+    t = t.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!t) return false;
+    return args.exact ? t === needle : t.includes(needle);
+  });
+}
+"""
+
+
+async def browser_click_checkbox_by_text(
+    label_text: str,
+    exact: bool = False,
+    frame_name: str = None,
+    frame_url: str = None,
+    timeout_ms: int = 10000,
+) -> dict:
+    """Click a checkbox by its visible label text, piercing shadow DOM (Issue #21).
+
+    Handles the common SPA case where a "checkbox" is a custom ``<div>``/``<span>``
+    with a click handler (no native ``<input>``), often inside a web component's
+    shadow DOM, and only appears after an earlier step of a multi-step form
+    (e.g. Fireworks onboarding: "Prototype with open models", "Conversational
+    AI", "Search").
+
+    SPA-safe: polls until an element with ``label_text`` exists before clicking,
+    so you can call it right after a "Continue" click without a manual wait.
+
+    Targeting:
+      - ``label_text`` -- substring (or exact, when ``exact=True``) of the
+        checkbox's visible text. "Prototype" matches "Prototype with open models".
+      - ``frame_name`` / ``frame_url`` -- run inside a named/URL-matched iframe
+        instead of the main frame (same semantics as the ``browser_*_in_frame``
+        tools).
+
+    Click resolution order: ``<label for>`` target, then a descendant
+    ``input[type=checkbox|radio]``, then a ``[role=checkbox]``, then the text
+    element itself.
+
+    Returns ``{"success": True, "method": ..., "element": ..., "matched_text":
+    ..., "state_before": ..., "state_after": ...}`` on success, or
+    ``{"success": False, "method": None, "element": None, "error": ...}`` if the
+    label never appeared.
+    """
+    # Imported lazily to avoid a circular import (frames -> manager,
+    # interaction -> manager) at module load time.
+    from sin_browser_tools.tools.frames import _resolve_frame
+
+    frame, error = _resolve_frame(frame_name, frame_url)
+    if error:
+        return {"success": False, "method": None, "element": None, "error": error}
+
+    args = {"label": label_text, "exact": exact, "maxDepth": 15}
+
+    # SPA-safe wait: poll the shadow-piercing matcher until the label exists.
+    deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+    last_exc = None
+    while True:
+        try:
+            present = await frame.evaluate(_CHECKBOX_PRESENT_JS, args)
+        except Exception as e:  # frame navigating mid-poll, etc.
+            present = False
+            last_exc = str(e)
+        if present:
+            break
+        if asyncio.get_event_loop().time() >= deadline:
+            return {
+                "success": False,
+                "method": None,
+                "element": None,
+                "error": (
+                    f"No element with text {label_text!r} appeared within "
+                    f"{timeout_ms}ms"
+                    + (f" (last eval error: {last_exc})" if last_exc else "")
+                    + ". The SPA step may not have advanced, the text may differ, "
+                    "or it may live in a closed shadow root."
+                ),
+            }
+        await asyncio.sleep(0.2)
+
+    try:
+        result = await frame.evaluate(_CHECKBOX_BY_TEXT_JS, args)
+    except Exception as e:
+        return {"success": False, "method": None, "element": None, "error": str(e)}
+
+    if not result.get("found"):
+        return {
+            "success": False,
+            "method": None,
+            "element": None,
+            "error": f"Element with text {label_text!r} disappeared before click.",
+        }
+    return {"success": True, **result}
+
+
 async def browser_upload_file(target: str, file_path: str) -> dict:
     resolved = await _resolve_target(target)
     if _is_cdp_descriptor(resolved):

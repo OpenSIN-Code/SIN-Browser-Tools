@@ -409,6 +409,87 @@ async def test_scan_frames_no_match_returns_hint(live_manager):
 
 
 # ---------------------------------------------------------------------------
+# browser_click_in_frame — click shadow-DOM rows inside a frame (Issue #12)
+# ---------------------------------------------------------------------------
+
+async def test_click_in_frame_clicks_shadow_mail_row(live_manager):
+    # Click the first <list-mail-item> in the "mail" iframe (open shadow DOM).
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", frame_name="mail", index=0
+    )
+    assert res["status"] == "clicked"
+    assert res["match_count"] == 3
+    assert "Invoice 2026-01" in (res.get("clicked_text") or "")
+    # Verify the click side effect actually fired inside the frame.
+    opened = await frames.browser_eval_in_frame(
+        "window.__opened", frame_name="mail"
+    )
+    assert opened["result"] == "Invoice 2026-01"
+
+
+async def test_click_in_frame_text_filter_selects_row(live_manager):
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", frame_name="mail", text="receipt"
+    )
+    assert res["status"] == "clicked"
+    opened = await frames.browser_eval_in_frame(
+        "window.__opened", frame_name="mail"
+    )
+    assert opened["result"] == "Your receipt"
+
+
+async def test_click_in_frame_no_match_returns_error(live_manager):
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", frame_name="mail", text="does-not-exist"
+    )
+    assert "error" in res
+    assert "hint" in res
+
+
+async def test_click_in_frame_index_out_of_range(live_manager):
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", frame_name="mail", index=99
+    )
+    assert "error" in res
+    assert res["match_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# browser_click_checkbox_by_text — label-driven checkbox click (Issue #21)
+# ---------------------------------------------------------------------------
+
+async def test_checkbox_by_text_native_label(live_manager):
+    # The "Agree" label wraps a native <input type=checkbox>.
+    res = await interaction.browser_click_checkbox_by_text("Agree")
+    assert res["success"] is True
+    assert res["method"] in ("label_for", "descendant_input")
+    checked = await live_manager.page.eval_on_selector("#chk", "el => el.checked")
+    assert checked is True
+
+
+async def test_checkbox_by_text_custom_shadow_checkbox(live_manager):
+    # <fancy-checkbox>: no native input, [role=checkbox] in OPEN shadow DOM.
+    res = await interaction.browser_click_checkbox_by_text("Prototype with open models")
+    assert res["success"] is True
+    assert res["state_before"] == "false"
+    assert res["state_after"] == "true"
+
+
+async def test_checkbox_by_text_partial_match(live_manager):
+    res = await interaction.browser_click_checkbox_by_text("Prototype")
+    assert res["success"] is True
+
+
+async def test_checkbox_by_text_missing_label_times_out(live_manager):
+    res = await interaction.browser_click_checkbox_by_text(
+        "no such checkbox label", timeout_ms=600
+    )
+    assert res["success"] is False
+    assert res["method"] is None
+    assert "error" in res
+
+
+# ---------------------------------------------------------------------------
 # set_active_page validation (Issue #14)
 # ---------------------------------------------------------------------------
 

@@ -303,6 +303,126 @@ async def browser_snapshot_in_frame(
 
 
 # ---------------------------------------------------------------------------
+# browser_click_in_frame — click a (shadow-DOM) element inside ONE frame
+# (Issue #12: GMX/web.de mail rows are <list-mail-item> custom elements nested
+# in OPEN shadow DOM inside a same-process "mail" iframe; browser_click /
+# browser_click_by_text operate on the main page's snapshot registry and never
+# reach them).
+# ---------------------------------------------------------------------------
+
+async def browser_click_in_frame(
+    selector: str,
+    frame_name: str = None,
+    frame_url: str = None,
+    index: int = 0,
+    text: str = None,
+    timeout_ms: int = 5000,
+) -> dict:
+    """Click an element inside a specific frame, piercing OPEN shadow DOM (Issue #12).
+
+    This is the click counterpart to ``browser_snapshot_in_frame``. It targets
+    the GMX/web.de case where message rows are custom elements
+    (e.g. ``list-mail-item``) nested in open shadow DOM inside a same-process
+    ``mail`` iframe, which the main-page click tools cannot reach.
+
+    Playwright's CSS locator engine pierces OPEN shadow roots automatically and
+    routes the click into the correct (possibly cross-origin) frame, so this is
+    far more reliable than ``element.click()`` via ``evaluate`` (which silently
+    fails on many shadow-DOM elements).
+
+    Targeting:
+      - ``selector`` -- CSS selector for the element(s) to click
+        (e.g. ``"list-mail-item"``). Required.
+      - ``frame_name`` -- exact iframe name (e.g. ``"mail"``).
+      - ``frame_url``  -- substring of the frame URL (e.g. ``"webmailer.gmx.net"``).
+      - neither name nor url -- the main frame.
+      Discover frames first with ``browser_list_frames``.
+
+    Selection among matches:
+      - ``text`` -- if given, only elements whose (rendered, shadow-inclusive)
+        text contains this substring are considered. Use it as a sender/subject
+        filter, e.g. ``text="Invoice"``.
+      - ``index`` -- which of the (optionally text-filtered) matches to click,
+        0-based (default 0 = first).
+
+    Returns ``{"status": "clicked", "frame": {...}, "selector", "index",
+    "match_count", "clicked_text"}`` on success, or ``{"error": ...}`` with a
+    hint (e.g. when nothing matched or the index is out of range).
+    """
+    frame, error = _resolve_frame(frame_name, frame_url)
+    if error:
+        return {"error": error}
+
+    try:
+        locator = frame.locator(selector)
+        if text:
+            locator = locator.filter(has_text=text)
+
+        match_count = await locator.count()
+        if match_count == 0:
+            return {
+                "error": (
+                    f"No element matched selector {selector!r}"
+                    + (f" with text containing {text!r}" if text else "")
+                    + " in this frame."
+                ),
+                "frame": _frame_descriptor(frame),
+                "hint": (
+                    "Verify the frame with browser_list_frames and the selector "
+                    "with browser_snapshot_in_frame. Remember: closed shadow "
+                    "roots are not reachable."
+                ),
+            }
+        if index < 0 or index >= match_count:
+            return {
+                "error": (
+                    f"index {index} is out of range; {match_count} element(s) "
+                    f"matched {selector!r}"
+                    + (f" with text {text!r}" if text else "")
+                    + "."
+                ),
+                "frame": _frame_descriptor(frame),
+                "match_count": match_count,
+            }
+
+        target = locator.nth(index)
+        try:
+            await target.scroll_into_view_if_needed(timeout=timeout_ms)
+        except Exception:
+            pass  # best-effort; click still hit-tests + auto-scrolls
+
+        # Capture the row's text before clicking, for an observable result the
+        # agent can confirm against. Custom elements render their content inside
+        # a shadow root, so inner_text() on the host is empty -- read the open
+        # shadow root too (this is the GMX <list-mail-item> case).
+        try:
+            clicked_text = await target.evaluate(
+                """(el) => {
+                    let t = (el.innerText || el.textContent || '');
+                    if (!t.trim() && el.shadowRoot) {
+                        t = el.shadowRoot.textContent || '';
+                    }
+                    return t.replace(/\\s+/g, ' ').trim().slice(0, 120);
+                }"""
+            )
+        except Exception:
+            clicked_text = None
+
+        await target.click(timeout=timeout_ms)
+        return {
+            "status": "clicked",
+            "frame": _frame_descriptor(frame),
+            "selector": selector,
+            "index": index,
+            "match_count": match_count,
+            "clicked_text": clicked_text,
+            "method": "frame_locator_pierce",
+        }
+    except Exception as e:
+        return {"error": str(e), "frame": _frame_descriptor(frame)}
+
+
+# ---------------------------------------------------------------------------
 # browser_scan_frames — scan ALL frames for text content (Issue #15)
 # ---------------------------------------------------------------------------
 

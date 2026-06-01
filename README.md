@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD033 -->
 <div align="center">
   <h1>SIN-Browser-Tools</h1>
-  <p><strong>Native browser automation for AI agents — 52 tools, shadow DOM piercing, OOPIF support</strong></p>
+  <p><strong>Native browser automation for AI agents — 54 tools, shadow DOM piercing, OOPIF support</strong></p>
 </div>
 <!-- markdownlint-enable MD033 -->
 
@@ -56,6 +56,7 @@ Browser automation library built for AI agents. Handles the hard parts: cross-or
 ```bash
 git clone https://github.com/OpenSIN-Code/SIN-Browser-Tools.git
 cd SIN-Browser-Tools
+python -m venv .venv && source .venv/bin/activate   # recommended
 pip install -e ".[dev]"
 ```
 
@@ -65,6 +66,28 @@ pip install -e ".[dev]"
 > python -m playwright install chromium
 > ```
 > This downloads the actual browser. Skipping it causes *"Executable doesn't exist"* errors.
+
+> [!TIP]
+> **Installing with `uv pip` / `rtk pip` or on a "managed" system** (Issue #1)
+>
+> `uv pip` / `rtk pip` refuse to install unless a virtual environment is active:
+> ```
+> error: No virtual environment found; run `uv venv` to create an environment,
+> or pass `--system` to install into a non-virtual environment
+> ```
+> Pick one of:
+> ```bash
+> # (recommended) create + activate a venv first, then install
+> uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+>
+> # or install into the active interpreter explicitly (uv / rtk)
+> uv pip install --system -e ".[dev]"
+>
+> # or, on PEP 668 "externally-managed-environment" systems, with plain pip
+> python3 -m pip install -e ".[dev]" --break-system-packages
+> ```
+> A venv is strongly preferred — `--system` / `--break-system-packages` mutate the
+> system interpreter and can conflict with OS-managed packages.
 
 ### Verify installation
 
@@ -156,9 +179,9 @@ result = await frames.browser_snapshot_in_frame(
 |----------|-------|---------|
 | **Navigation** | `navigate`, `back`, `forward`, `reload`, `scroll`, `press`, `wait_for*` | Move around pages |
 | **Tabs** | `list_tabs`, `new_tab`, `switch_tab`, `close_tab` | Multi-tab workflows |
-| **Interaction** | `click`, `click_cdp`, `type`, `fill`, `check`, `select_option`, `hover`, `drag` | User actions |
+| **Interaction** | `click`, `click_cdp`, `type`, `fill`, `check`, `click_checkbox_by_text`, `select_option`, `hover`, `drag` | User actions |
 | **Accessibility** | `snapshot`, `snapshot_full_oopif` | See page structure |
-| **Frames** | `list_frames`, `eval_in_frame`, `snapshot_in_frame`, `scan_frames` | Handle iframes/shadow DOM |
+| **Frames** | `list_frames`, `eval_in_frame`, `snapshot_in_frame`, `click_in_frame`, `scan_frames` | Handle iframes/shadow DOM |
 | **Vision** | `screenshot`, `screenshot_element`, `pdf`, `get_images`, `get_text` | Visual capture |
 | **Extraction** | `console`, `cdp`, `get_html`, `get_links`, `get_attribute`, `storage`, `cookies` | Data extraction |
 | **Dialog** | `dialog`, `wait_for_dialog` | Handle alerts/confirms/prompts |
@@ -188,7 +211,7 @@ Add to your MCP config (`claude_desktop_config.json` or similar):
 # v2 server (recommended - high-level tools)
 sin-browser-mcp
 
-# Legacy server (all 52 tools flat)
+# Legacy server (all 54 tools flat)
 sin-browser-mcp-legacy
 ```
 

@@ -27,9 +27,18 @@ _PNG_1PX = (
 MAIL_FRAME_HTML = """<!doctype html><html><body>
 <mail-list-container></mail-list-container>
 <script>
+// NOTE: deliberately do NOT add visible light-DOM text to this frame. The
+// scan_frames tests rely on the frame's textContent (which falls back to this
+// inline <script> source containing "Invoice 2026-01" / "2026") to exercise the
+// GMX "unnamed/empty frame" path; adding rendered text would mask that.
 customElements.define('list-mail-item', class extends HTMLElement {
   constructor(){ super(); const r=this.attachShadow({mode:'open'});
-    r.innerHTML = '<div class="subject">'+this.getAttribute('subject')+'</div>'; }
+    r.innerHTML = '<div class="subject">'+this.getAttribute('subject')+'</div>';
+    // Click side effect so browser_click_in_frame can be verified: record the
+    // subject of the opened mail on a window var (no visible DOM text added).
+    this.addEventListener('click', () => {
+      window.__opened = this.getAttribute('subject');
+    }); }
 });
 customElements.define('mail-list-container', class extends HTMLElement {
   constructor(){ super(); const r=this.attachShadow({mode:'open'});
@@ -62,6 +71,7 @@ FIXTURE_HTML = """<!doctype html>
     <option value="b">Beta</option>
   </select>
   <label><input id="chk" type="checkbox" aria-label="Agree" /> Agree</label>
+  <fancy-checkbox></fancy-checkbox>
   <img id="logo" src="{png}" alt="logo" width="1" height="1" />
   <iframe id="frame" srcdoc="<button>inner button</button>"></iframe>
   <iframe id="mail" name="mail" srcdoc="{mail_srcdoc}"></iframe>
@@ -69,6 +79,22 @@ FIXTURE_HTML = """<!doctype html>
   <script>
     document.getElementById('btn').addEventListener('click', () => {{
       document.getElementById('result').innerText = 'clicked';
+    }});
+    // Custom "checkbox" with NO native <input>, a [role=checkbox], its label
+    // text living inside OPEN shadow DOM -- the Issue #21 / Fireworks case that
+    // browser_click_checkbox_by_text must handle (toggles aria-checked).
+    customElements.define('fancy-checkbox', class extends HTMLElement {{
+      constructor() {{
+        super();
+        const r = this.attachShadow({{mode: 'open'}});
+        r.innerHTML = '<div role="checkbox" aria-checked="false">'
+          + 'Prototype with open models</div>';
+        const box = r.querySelector('[role=checkbox]');
+        box.addEventListener('click', () => {{
+          const checked = box.getAttribute('aria-checked') === 'true';
+          box.setAttribute('aria-checked', checked ? 'false' : 'true');
+        }});
+      }}
     }});
   </script>
 </body>

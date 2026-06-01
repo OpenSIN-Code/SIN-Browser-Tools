@@ -5,12 +5,17 @@ All notable changes to SIN-Browser-Tools.
 ## [Unreleased]
 
 ### Added
-- **Frame tools** (Issue #11, #15):
+- **Frame tools** (Issue #11, #12, #15):
   - `browser_list_frames` — list all frames on page
   - `browser_eval_in_frame` — run JS in specific frame by name/URL
   - `browser_snapshot_in_frame` — walk frame DOM with shadow-piercing
+  - `browser_click_in_frame` — click a (shadow-DOM) element inside one frame,
+    e.g. GMX/web.de `list-mail-item` mail rows (Issue #12)
   - `browser_scan_frames` — scan ALL frames for text/regex (unnamed iframe support)
-- **Smoke test suite** — 51 end-to-end tests covering all tools
+- `browser_click_checkbox_by_text` (Issue #21) — click a checkbox by its visible
+  label; pierces open shadow DOM, handles custom (non-`<input>`) checkboxes, and
+  is SPA-safe (polls until the label appears).
+- **Smoke test suite** — 59 end-to-end tests covering all tools
 - `set_active_page` validation (Issue #14) — clear errors instead of cryptic crashes
 - Hints in `browser_snapshot` pointing to frame tools when content is missing
 
@@ -20,6 +25,15 @@ All notable changes to SIN-Browser-Tools.
   the `frame` field on `FrameInfo`.
 - **Issue #11**: GMX mail list invisible (custom elements in shadow DOM). Solved
   by `browser_snapshot_in_frame` with `pierce_shadow=True`.
+- **Issue #12**: GMX/web.de mail rows (`list-mail-item` custom elements in an
+  iframe's open shadow DOM) could be read but not clicked. Solved by
+  `browser_click_in_frame`, which routes a Playwright shadow-piercing locator
+  click into the target frame.
+- **Issue #21**: no way to tick a checkbox by its visible label when the control
+  is a custom element / lives in shadow DOM / only appears after a prior SPA
+  step. Solved by `browser_click_checkbox_by_text`.
+- **Issue #1**: documented `uv pip` / `rtk pip` "No virtual environment found"
+  and PEP 668 "externally-managed-environment" installs in the README.
 - **Issue #14**: `set_active_page(None)` crashed with `'NoneType' has no attribute
   'context'`. Now validates input and gives a helpful error.
 - **Issue #15**: Email body in unnamed `about:blank` iframe unreachable. Solved
