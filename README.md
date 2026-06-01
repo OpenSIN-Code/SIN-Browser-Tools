@@ -251,11 +251,13 @@ debug> quit
 | Document | Purpose |
 |----------|---------|
 | [AGENTS.md](./AGENTS.md) | **Start here if you're an AI agent** — operating manual, rules, error fixes |
+| [DEVELOPMENT.md](./DEVELOPMENT.md) | Local setup, adding tools, debugging (quick links to other dev docs) |
+| [docs/TOOL_DEVELOPMENT.md](./docs/TOOL_DEVELOPMENT.md) | Best practices for tool development, return contracts, testing (for new tool authors) |
 | [COOKBOOK.md](./COOKBOOK.md) | Copy-paste recipes for common tasks |
 | [API.md](./API.md) | Complete tool reference |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design and internals |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute, backwards compatibility, return contract stability (Issue #28) |
 | [CLAUDE.md](./CLAUDE.md) | Guide for AI coding assistants |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute |
 | [CHANGELOG.md](./CHANGELOG.md) | Version history |
 
 Per-module docs live next to source files (e.g., `sin_browser_tools/tools/frames.md`).
@@ -264,10 +266,13 @@ Per-module docs live next to source files (e.g., `sin_browser_tools/tools/frames
 
 We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for:
 
-- Development setup
+- Development setup (see also [DEVELOPMENT.md](./DEVELOPMENT.md))
 - Code style (ruff, pre-commit)
 - Testing requirements
 - PR process
+- **Return contract stability** (backwards compatibility rules — key lesson from Issue #28)
+
+If you're **adding a new tool**, see [docs/TOOL_DEVELOPMENT.md](./docs/TOOL_DEVELOPMENT.md) for the complete best-practices checklist.
 
 ```bash
 # Quick setup

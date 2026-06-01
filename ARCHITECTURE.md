@@ -62,7 +62,8 @@ pierces Shadow-DOM and same-origin subframes but **stops at OOPIF boundaries**.
 ## Design Principles
 
 - Vision-first navigation (no HTML parsing)
-- JSON-serializable results
+- JSON-serializable results (every tool returns a dict)
+- **Stable return contracts** — Tool return dicts are public API; keys are never renamed/removed, only added (see [CONTRIBUTING.md: Return Contract Stability](./CONTRIBUTING.md#return-contract-stability))
 - Async/await throughout
 - Zero-configuration defaults
 - Multi-runtime support (local + CDP)
