@@ -31,6 +31,7 @@ self-describing catalog with parameter schemas.
 ## Interaction
 - `browser_click(target: str)` - Click (@eN or selector; auto CDP for OOPIF)
 - `browser_click_cdp(target: str)` - Force a native CDP click
+- `browser_click_by_text(text: str, exact: bool)` - Click by visible text (selector fallback)
 - `browser_double_click(target)` / `browser_right_click(target)` - Click variants
 - `browser_hover(target)` - Hover an element
 - `browser_drag(source, target)` - Drag and drop
@@ -39,6 +40,7 @@ self-describing catalog with parameter schemas.
 - `browser_type(target, text, clear: bool)` - Type text
 - `browser_fill(target, value)` - Clear + fill an input
 - `browser_upload_file(target, file_path)` - Upload a file
+- `browser_find_by_text(text: str, exact: bool)` - Find elements by visible text (returns @eN refs)
 
 ## Vision
 - `browser_vision(full_page: bool)` / `browser_screenshot(full_page: bool)` - Page screenshot (Base64 PNG)
@@ -59,5 +61,11 @@ self-describing catalog with parameter schemas.
 ## Dialog
 - `browser_dialog(action: str, prompt_text: str)` - Handle a JS dialog
 - `browser_wait_for_dialog(timeout: float)` - Wait for a dialog
+
+## Frames (Issue #11, #15)
+- `browser_list_frames()` - List all frames (main, OOPIFs, same-process)
+- `browser_eval_in_frame(expr: str, frame_name: str, frame_url: str)` - Run JS in specific frame
+- `browser_snapshot_in_frame(frame_name, frame_url, selector, pierce_shadow)` - Walk frame DOM, pierce open shadow roots
+- `browser_scan_frames(pattern, regex, include_empty)` - Scan ALL frames for text content (unnamed iframe support)
 
 See README for usage examples.

@@ -3,10 +3,11 @@
 Native browser automation library inspired by Hermes Agent.
 
 Features:
-- 46 Native Tools (navigation, tabs, interaction, accessibility, vision, extraction, dialogs)
+- **52 Native Tools** covering navigation, interaction, accessibility (OOPIF/Shadow-DOM), vision, extraction, dialogs, frame traversal
 - Ref-ID System (@e1, @e2, ...) with CDP / OOPIF / Shadow-DOM support
 - Schema-safe MCP tool names (`browser_*`, matching `^[a-zA-Z0-9_-]{1,64}$`)
 - OpenSIN Compatible (registry auto-derived from the tool catalog)
+- **Frame tools** that pierce open shadow roots and scan unnamed iframes (GMX webmail support)
 - MCP Server (Claude Desktop, Cursor, Cline)
 - CLI Interface
 

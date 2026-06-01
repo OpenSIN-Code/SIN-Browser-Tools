@@ -44,13 +44,14 @@ pierces Shadow-DOM and same-origin subframes but **stops at OOPIF boundaries**.
 - Both the MCP server and the OpenSIN skill registry consume the catalog, so the
   advertised surface can never drift from the implementation.
 
-**46 Tools** across categories:
+**52 Tools** across categories:
 - **Accessibility**: snapshot, snapshot_full_oopif
 - **Navigation**: navigate, back, forward, reload, scroll, press, get_url, set_viewport, wait_for*, tabs
-- **Interaction**: click, click_cdp, double_click, right_click, hover, drag, select_option, check, type, fill, upload_file
+- **Interaction**: click, click_cdp, double_click, right_click, hover, drag, select_option, check, type, fill, upload_file, find_by_text, click_by_text
 - **Vision**: vision/screenshot, screenshot_element, pdf, get_images, get_text
 - **Dialog**: dialog, wait_for_dialog
 - **Extraction**: console, cdp, get_html, get_links, get_attribute, storage, cookies
+- **Frames**: list_frames, eval_in_frame, snapshot_in_frame, scan_frames
 
 ## Integration Layers
 
