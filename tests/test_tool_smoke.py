@@ -19,6 +19,7 @@ from sin_browser_tools.tools import (
     catalog,
     dialog,
     extraction,
+    frames,
     interaction,
     navigation,
     vision,
@@ -316,3 +317,62 @@ async def test_dialog_wait_then_accept(live_manager):
 async def test_dialog_invalid_action(live_manager):
     res = await dialog.browser_dialog("frobnicate")
     assert res["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Frame tools -- shadow DOM + iframe traversal (Issue #11, GMX mail list)
+# ---------------------------------------------------------------------------
+
+async def test_list_frames_includes_named_mail_frame(live_manager):
+    res = await frames.browser_list_frames()
+    assert res["count"] >= 3  # main + #frame + #mail
+    names = {f["name"] for f in res["frames"]}
+    assert "mail" in names
+
+
+async def test_eval_in_frame_by_name(live_manager):
+    # Plain querySelectorAll does NOT pierce shadow DOM, so the custom elements
+    # are invisible to it -- this asserts the *baseline* GMX problem exists in
+    # the fixture, justifying browser_snapshot_in_frame below.
+    res = await frames.browser_eval_in_frame(
+        "document.querySelectorAll('list-mail-item').length", frame_name="mail"
+    )
+    assert res["result"] == 0
+    assert res["frame"]["name"] == "mail"
+
+
+async def test_eval_in_frame_unknown_target_errors(live_manager):
+    res = await frames.browser_eval_in_frame("1+1", frame_name="does-not-exist")
+    assert "error" in res
+
+
+async def test_snapshot_in_frame_pierces_shadow_for_mail_items(live_manager):
+    # The whole point of Issue #11: read the email subjects that live inside
+    # custom elements nested in OPEN shadow DOM of a same-process iframe.
+    res = await frames.browser_snapshot_in_frame(
+        frame_name="mail", selector="list-mail-item"
+    )
+    assert res["count"] == 3, res
+    subjects = {item["text"] for item in res["items"]}
+    assert "Invoice 2026-01" in subjects
+    assert "Your receipt" in subjects
+    assert res["open_shadow_roots"] >= 1
+
+
+async def test_snapshot_in_frame_no_pierce_finds_nothing(live_manager):
+    # Without shadow piercing the custom-element rows are unreachable, proving
+    # the pierce_shadow path is what makes the difference.
+    res = await frames.browser_snapshot_in_frame(
+        frame_name="mail", selector="list-mail-item", pierce_shadow=False
+    )
+    assert res["count"] == 0
+
+
+async def test_snapshot_in_frame_by_url_substring(live_manager):
+    # Target by URL substring instead of name (mirrors frame_url="webmailer.gmx.net").
+    res = await frames.browser_snapshot_in_frame(
+        frame_url="example.com", selector="h1"
+    )
+    # Main fixture origin is http://smoke.test/, so example.com won't match a
+    # frame here -> a helpful error, not a crash.
+    assert "error" in res

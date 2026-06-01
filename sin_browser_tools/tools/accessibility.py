@@ -222,6 +222,16 @@ def _build_hints(
                 "No interactive elements were found. The page may not be loaded "
                 "yet -- call browser_wait, then browser_snapshot again."
             )
+        # 2b) The content may live in a same-process iframe whose rows are custom
+        #     elements in shadow DOM (e.g. GMX/web.de mail list). The AX tree is
+        #     blind to those -- point the agent at the frame-scoped DOM walker.
+        hints.append(
+            "If content is still missing, it may be inside a same-process "
+            "iframe rendered with custom elements / shadow DOM (e.g. a webmail "
+            "message list). Call browser_list_frames, then "
+            "browser_snapshot_in_frame(frame_url=..., selector=...) which pierces "
+            "open shadow roots."
+        )
 
     # 3) A frame's CDP session could not be opened.
     if scan_failures > 0:

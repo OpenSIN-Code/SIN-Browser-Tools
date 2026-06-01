@@ -12,6 +12,7 @@ from sin_browser_tools.tools import (
     accessibility,
     dialog,
     extraction,
+    frames,
     interaction,
     navigation,
     vision,
@@ -25,6 +26,7 @@ TOOL_MODULES = [
     extraction,
     vision,
     dialog,
+    frames,
 ]
 
 _PY_TO_JSON = {
