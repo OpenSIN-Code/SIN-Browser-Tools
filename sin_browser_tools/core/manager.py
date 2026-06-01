@@ -272,6 +272,15 @@ class BrowserManager:
             logger.info("Cleanup initiated")
             errors = []
 
+            # Parallele (nicht-default) Sessions zuerst schliessen, damit kein
+            # verwaister BrowserContext einen Zombie-Tab offen haelt.
+            try:
+                sm = self.__dict__.get("_session_mgr")
+                if sm is not None:
+                    await sm.close_all()
+            except Exception as e:
+                errors.append(f"sessions.close_all: {e}")
+
             try:
                 if self._context:
                     await self._context.close()
@@ -303,6 +312,9 @@ class BrowserManager:
             self._dialog_queue = asyncio.Queue()
             self._pending_dialog = None
             self._dialog_pages = weakref.WeakSet()
+            # SessionManager (parallele Contexts) verwerfen -- die alten
+            # Context-Referenzen sind nach dem Browser-Close ungueltig.
+            self.__dict__.pop("_session_mgr", None)
 
             if errors:
                 logger.warning("Cleanup completed with errors", errors=errors)
@@ -648,6 +660,20 @@ class _ManagerProxy:
 
     def set_active_page(self, page: Page) -> None:
         self._require().set_active_page(page)
+
+    # sessions verwaltet parallele, isolierte BrowserContexts. Wie die
+    # registry haengen wir EINE persistente SessionManager-Instanz an die aktive
+    # BrowserManager-Instanz (lazy), damit Session-State erhalten bleibt.
+    @property
+    def sessions(self):
+        from sin_browser_tools.core.sessions import SessionManager
+        inst = self._require()
+        sm = inst.__dict__.get("_session_mgr")
+        if sm is None:
+            sm = SessionManager(inst)
+            inst._session_mgr = sm
+        sm._ensure_default_registered()
+        return sm
 
     # --- Forwarding fuer alle anderen Methoden ---
 

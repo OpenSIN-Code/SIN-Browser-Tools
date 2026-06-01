@@ -22,6 +22,18 @@ Comprehensive guide for AI agents using SIN-Browser-Tools.
 | `browser_switch_tab` | Switch to tab by index |
 | `browser_close_tab` | Close tab (defaults to active) |
 
+### Parallel Sessions / Multi-Context (NEW)
+Each "session" is a fully ISOLATED BrowserContext (separate cookies, localStorage,
+sessionStorage, auth) — unlike tabs, which share one cookie jar.
+
+| Tool | Purpose |
+|------|---------|
+| `browser_create_session` | Create a new isolated session by name |
+| `browser_list_sessions` | List sessions (name, active, tab count, URL) |
+| `browser_switch_session` | Make a session active (all tools then act on it) |
+| `browser_close_session` | Close a session (auto-switches if it was active) |
+| `browser_parallel_navigate` | Navigate many sessions concurrently |
+
 ### Window Control (NEW - Issue #27)
 | Tool | Purpose |
 |------|---------|
@@ -123,28 +135,32 @@ Comprehensive guide for AI agents using SIN-Browser-Tools.
 
 ## What's Missing? Gap Analysis
 
-### 1. Parallel Sessions / Multi-Context (Priority: HIGH)
+### 1. Parallel Sessions / Multi-Context — ✅ DONE
 
-**Current state:** Single BrowserContext, single active page  
-**Missing:**
-- `browser_create_context` - Create isolated browser context
-- `browser_list_contexts` - List all contexts
-- `browser_switch_context` - Switch active context
-- `browser_close_context` - Close context and all its pages
-- `browser_run_parallel` - Run actions in parallel across contexts
+**Implemented** via `core/sessions.py` (SessionManager) + `tools/sessions.py`:
+`browser_create_session`, `browser_list_sessions`, `browser_switch_session`,
+`browser_close_session`, `browser_parallel_navigate`.
 
-**Why important:** AI agents often need to:
-- Compare two versions of a page side-by-side
-- Run parallel searches
-- Maintain logged-in and logged-out sessions
-- A/B testing scenarios
+Each session is a separate Playwright BrowserContext, so cookies/storage/auth are
+fully isolated. Switching a session re-points the manager's active `_context`/
+`_page`, so every existing tool (navigate, click, fill, snapshot, ...) operates on
+the switched session with no extra wiring.
 
-**Implementation hint (from browser-use):**
 ```python
-# Each context = isolated session (cookies, storage, etc.)
-context1 = await browser.new_context()
-context2 = await browser.new_context()  # Completely isolated!
+# Compare logged-in vs logged-out, or two accounts, in parallel:
+await browser_create_session("admin")
+await browser_create_session("guest")
+await browser_parallel_navigate([
+    {"name": "admin", "url": "https://app.example.com/dashboard"},
+    {"name": "guest", "url": "https://app.example.com/dashboard"},
+])
+await browser_switch_session("admin")   # subsequent tools act on 'admin'
+# ... snapshot/click/fill on admin ...
+await browser_switch_session("guest")   # isolated: no admin cookies here
 ```
+
+**Note:** Requires a real browser (default `start_local` or CDP). A persistent
+`user_data_dir` launch only supports one context — use tabs there instead.
 
 ### 2. Network Interception Tools (Priority: MEDIUM)
 
