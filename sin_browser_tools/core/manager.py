@@ -6,6 +6,7 @@ und Enterprise-Features (Session Vault, Observability).
 import asyncio
 import os
 import signal
+import threading
 import weakref
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -30,19 +31,26 @@ class BrowserManager:
 
     def __init__(
         self,
-        headless: bool = True,
+        headless: Optional[bool] = None,
         user_data_dir: Optional[str] = None,
         proxy: Optional[dict] = None,
-        vault_path: str = "./.sin_vault",
-        trace_dir: str = "./.sin_traces",
-        stealth: bool = True,
+        vault_path: Optional[str] = None,
+        trace_dir: Optional[str] = None,
+        stealth: Optional[bool] = None,
+        executable_path: Optional[str] = None,
     ):
-        self.headless = headless
+        from sin_browser_tools.opensin_config import get_config
+        cfg = get_config()
+
+        # Explizites Argument > Config > Default
+        self.headless = cfg.headless if headless is None else headless
+        self.stealth = cfg.stealth if stealth is None else stealth
         self.user_data_dir = user_data_dir
         self.proxy = proxy
-        self.stealth = stealth
-        self.vault = SessionVault(vault_path)
-        self.tracer = TraceLogger(trace_dir)
+        self.executable_path = executable_path or cfg.executable_path
+        self.vault = SessionVault(vault_path or cfg.session_dir)
+        self.tracer = TraceLogger(trace_dir or cfg.trace_dir)
+        self.auto_record_on_failure = cfg.auto_record_on_failure
 
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
@@ -77,16 +85,39 @@ class BrowserManager:
         self._install_signal_handlers()
 
     def _install_signal_handlers(self):
-        """Garantiert Cleanup bei SIGTERM/SIGINT."""
+        """Best-effort Cleanup bei SIGTERM/SIGINT.
+
+        Nutzt den LAUFENDEN Event-Loop (loop.add_signal_handler), wenn vorhanden
+        -- das ist die einzig korrekte async-Variante. Fällt sonst auf
+        signal.signal zurück. Beides nur im Main-Thread möglich; in Worker-
+        Threads (z.B. eingebetteter MCP-Server) wird sauber übersprungen.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.add_signal_handler(
+                        sig, lambda: asyncio.ensure_future(self.cleanup())
+                    )
+                except (NotImplementedError, RuntimeError, ValueError):
+                    pass
+            return
+
+        # Kein laufender Loop (synchroner Kontext): klassischer Handler, der den
+        # Loop erst zur Signalzeit sucht -- ohne die deprecated get_event_loop().
         def _handler(signum, frame):
             logger.warning("Signal received, triggering cleanup", signal=signum)
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self.cleanup())
+                running = asyncio.get_running_loop()
+                running.create_task(self.cleanup())
             except RuntimeError:
                 pass
-
         try:
             signal.signal(signal.SIGTERM, _handler)
             signal.signal(signal.SIGINT, _handler)
@@ -292,10 +323,15 @@ class BrowserManager:
             return
         try:
             if os.name == "posix":
-                # SIGTERM an den gesamten Prozessbaum (negativer PID = Prozessgruppe
-                # falls vorhanden; sonst direkter PID). pkill -P killt Kinder.
+                # Ganzen Prozessbaum: pkill -P rekursiv einsammeln, dann killen.
                 proc = await asyncio.create_subprocess_shell(
-                    f"pkill -TERM -P {pid} 2>/dev/null; kill -TERM {pid} 2>/dev/null || true"
+                    "pkill -TERM -P {pid} 2>/dev/null; kill -TERM {pid} 2>/dev/null || true".format(pid=pid)
+                )
+                await proc.wait()
+            elif os.name == "nt":
+                # taskkill /T killt den gesamten Baum unter pid.
+                proc = await asyncio.create_subprocess_shell(
+                    "taskkill /PID {pid} /T /F >NUL 2>&1".format(pid=pid)
                 )
                 await proc.wait()
         except Exception as e:
