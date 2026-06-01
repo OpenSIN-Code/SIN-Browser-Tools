@@ -172,6 +172,40 @@ Tools are auto-discovered by `catalog.discover()`. Requirements:
 
 ---
 
+## Return Contract Stability
+
+Agents and tests branch on the **keys** a tool returns, so a tool's return dict is
+a public API. Changing it is a breaking change.
+
+**Rules:**
+
+1. **Never rename or remove an existing key** in a released tool's return dict.
+   Renaming `status` → `found`, or dropping `error`, breaks every caller that
+   reads the old key. (This is exactly what caused [Issue #28][i28]: the #22
+   enhancement swapped `{"status": "found"}` for `{"found": true}` and broke the
+   whole suite.)
+
+2. **Evolve contracts additively.** To expose new information, *add* a new key
+   and keep the old one. Returning **both** `status` *and* `found` is backwards
+   compatible and still ships the new data.
+
+3. **Keep the `status` key on every code path** (`success`/`ok`, `timeout`,
+   `error`, `unsupported`, …). Error and early-return paths must carry it too,
+   not just the happy path.
+
+4. **Pin the contract with a test.** Assert the exact keys for *both* the success
+   and failure paths so a future refactor can't silently drop one. See
+   `tests/test_tool_smoke.py::test_wait_for_text_returns_both_status_and_found`
+   for the reference pattern.
+
+5. **If a breaking change is truly unavoidable**, open an issue first, bump the
+   version, and document the migration in `CHANGELOG.md` under a `### Changed`
+   (breaking) heading.
+
+[i28]: https://github.com/OpenSIN-Code/SIN-Browser-Tools/issues/28
+
+---
+
 ## Pull Request Process
 
 ### Before Submitting

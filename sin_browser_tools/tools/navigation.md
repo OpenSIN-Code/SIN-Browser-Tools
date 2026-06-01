@@ -25,8 +25,11 @@ management.
 | `browser_wait_for_load` | `(state="networkidle", timeout=15000)` | Wait for `load`/`domcontentloaded`/`networkidle`. |
 | `browser_wait_for_spa_transition` | `(target_text, timeout_ms=30000, pierce_shadow=True)` | MutationObserver-based instant detection when text appears in DOM. |
 
-All waiters return `{"status": "timeout", ...}` or `{"found": false, ...}` instead of throwing, so an agent
-can branch on the result.
+All waiters return a result dict instead of throwing, so an agent can branch on the
+result. Every waiter carries a `status` key (`"found"` / `"timeout"` / `"error"`);
+`browser_wait_for_text` additionally exposes a `found` boolean (Issue #22) alongside
+that legacy `status` key. Branch on whichever you prefer — both are always present
+(see [Return contract stability](../../CONTRIBUTING.md#return-contract-stability)).
 
 ### `browser_wait_for_text` (Issue #22)
 
