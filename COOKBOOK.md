@@ -146,6 +146,43 @@ browser_get_html(selector=".pricing")   # raw HTML of one region
 
 ---
 
+## Recipe 9 — Read an email body in an unnamed iframe (Issue #15)
+
+Some webmail sites (GMX, web.de) render the email body in an unnamed `about:blank`
+iframe that neither the normal snapshot nor URL-based targeting can access.
+Use `browser_scan_frames` to find and extract content from all frames.
+
+```text
+# After clicking an email, you need to extract the body content.
+# The snapshot shows the mail list, but the body is in a hidden frame.
+browser_scan_frames(pattern="Your OTP code")
+# Output: {"matching_frames": 1, "frames": [{"index": 2, "text": "... Your OTP code is: 123456 ..."}]}
+browser_eval_in_frame("document.body.innerText", frame_name="email-body")
+# or, for structured extraction:
+browser_scan_frames(regex=r"\d{6}")  # find 6-digit codes in any frame
+```
+
+If the frame has no name (unnamed `<iframe>`), `browser_scan_frames` is your only option.
+
+---
+
+## Recipe 10 — Pierce shadow DOM in a same-process iframe (Issue #11)
+
+Pages like the GMX mail list render emails as custom elements (`<list-mail-item>`)
+inside open shadow DOM. A normal snapshot cannot see them. Use `browser_snapshot_in_frame`
+with `pierce_shadow=True`.
+
+```text
+browser_snapshot_full_oopif             # see all frames
+# Find the mail frame by its name or URL substring:
+browser_snapshot_in_frame(frame_name="mail", selector="list-mail-item")
+# Output: {"count": 3, "items": [{"text": "Invoice 2026-01"}, ...]}
+browser_snapshot_in_frame(frame_url="webmailer.gmx.net", selector=".subject")
+# With pierce_shadow=True (default), subjects inside shadow roots are readable.
+```
+
+---
+
 ## Anti-patterns (do NOT do these)
 
 - Acting twice in a row without a snapshot between them.

@@ -14,7 +14,7 @@ python -m playwright install chromium
 ## Testing
 
 ```bash
-python test_all_tools.py
+python -m pytest
 ```
 
 ## Debugging
