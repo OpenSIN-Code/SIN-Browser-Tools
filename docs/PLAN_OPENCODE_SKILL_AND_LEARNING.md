@@ -1,6 +1,12 @@
 # Plan: OpenCode-CLI-Skill für SIN-Browser-Tools + Learning-by-Doing
 
-> **Status:** Vorschlag — wartet auf Freigabe.
+> **Status:** **IMPLEMENTIERT** (Commit `192a607`, 2026-06-01)
+> - [x] Core: playbook.py, learning.py, screen_record.py
+> - [x] Skills: sin-browser-automation, sin-browser-skill-authoring, sin-browser-learning
+> - [x] Generator: skills/generator.py
+> - [x] Tests: test_playbook.py, test_screen_record.py, test_skill_generator.py
+> - [x] Verkabelung: catalog.py, tools/__init__.py, .gitignore
+>
 > **Verwandt:** baut auf `AGENTS.md` (Loop), `COOKBOOK.md` (Rezepte),
 > `sin_browser_tools/opensin_skill.py` (Tool-Registry aus Catalog) auf.
 > **Prinzip dieser Plan-Datei:** Jede neue Datei steht hier **vollständig mit

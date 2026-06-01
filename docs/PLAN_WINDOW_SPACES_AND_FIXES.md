@@ -1,9 +1,13 @@
 # PLAN: Window-Control, macOS-Spaces & Bugfixes + Doku-Offensive
 
-> Status: **PROPOSAL — awaiting go/no-go**
+> Status: **TEILWEISE IMPLEMENTIERT**
+> - [x] B1-B4 Bugfixes: **Implementiert** (Commit `63248dd`, 2026-06-01)
+> - [ ] F1 Window-Control: **Offen** (core/window.py + tools/window.py)
+> - [ ] F2 macOS-Spaces: **Offen** (core/spaces.py)
+> - [ ] D1 Doku-Offensive: **Offen**
+>
 > Autor: v0 (Analyse + Implementierungsplan)
 > Ziel-Repo: `OpenSIN-Code/SIN-Browser-Tools`
-> Branch (geplant): `feat/window-spaces-and-docs`
 > Geltungsbereich: Bugfixes + 2 große Features (Fenster-Steuerung, macOS-Spaces) + komplette Doku-Neufassung.
 
 Dieses Dokument ist **selbst-ausführbar gedacht**: Jeder Abschnitt enthält den
