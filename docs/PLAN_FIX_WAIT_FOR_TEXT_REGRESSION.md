@@ -1,8 +1,14 @@
 # Plan: Fix `browser_wait_for_text` return-contract regression
 
-Status: OPEN
+Status: RESOLVED (Option B implemented)
 Owner: TBD
 Introduced by: Issue #22 enhancement (commit `81ff20d`)
+
+> Resolution: Option B applied. `browser_wait_for_text` now returns BOTH the
+> legacy `status` key (`found`/`timeout`/`error`) and the Issue #22 `found`
+> boolean. Regression test
+> `tests/test_tool_smoke.py::test_wait_for_text_returns_both_status_and_found`
+> added. Full suite: **103 passed, 2 skipped (macOS-only), 0 failed**.
 
 ---
 

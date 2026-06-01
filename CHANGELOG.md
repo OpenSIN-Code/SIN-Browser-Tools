@@ -4,6 +4,15 @@ All notable changes to SIN-Browser-Tools.
 
 ## [Unreleased]
 
+### Fixed
+- **browser_wait_for_text return-contract regression** (Issue #28): the Issue #22
+  enhancement switched the return dict from the `status` key ("found"/"timeout")
+  to a `found` boolean, breaking every caller/test that checked
+  `result["status"] == "found"`. The contract is now additive — both the legacy
+  `status` key (`found`/`timeout`/`error`) and the new `found` boolean (plus the
+  `element`/`matchCount`/`method` fields) are returned, restoring backwards
+  compatibility without losing the Shadow DOM/element-info enhancements.
+
 ### Added
 - **browser_wait_for_text enhancements** (Issue #22):
   - Shadow DOM support: Searches across OPEN shadow roots

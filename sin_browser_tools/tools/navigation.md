@@ -48,8 +48,14 @@ This tool is designed for SPA multi-step content where URL/navigation events don
 - `frame_url`: Optional iframe URL substring to match
 
 **Return value:**
+
+The contract is additive: the legacy `status` key (`"found"` / `"timeout"` /
+`"error"`) is always present for backwards compatibility, alongside the Issue #22
+`found` boolean and the element-info fields.
+
 ```json
 {
+  "status": "found",
   "found": true,
   "text": "Step 2: Select preferences",
   "element": {
@@ -60,6 +66,17 @@ This tool is designed for SPA multi-step content where URL/navigation events don
   },
   "matchCount": 1,
   "method": "poll"
+}
+```
+
+On timeout:
+```json
+{
+  "status": "timeout",
+  "found": false,
+  "text": "Step 2: Select preferences",
+  "error": "Text 'Step 2: Select preferences' did not appear within 15000ms",
+  "method": "timeout"
 }
 ```
 

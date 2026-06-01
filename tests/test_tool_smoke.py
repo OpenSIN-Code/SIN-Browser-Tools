@@ -137,6 +137,29 @@ async def test_navigation_waits(live_manager):
     assert timed_out["status"] == "timeout"
 
 
+async def test_wait_for_text_returns_both_status_and_found(live_manager):
+    """Regression guard for Issue #28: browser_wait_for_text must keep the
+    backwards-compatible ``status`` key (pre-#22 contract) AND expose the new
+    ``found`` boolean from the Issue #22 enhancement, so old and new callers
+    both keep working.
+    """
+    # Success case: text is present -> status == "found" AND found is True,
+    # while the Issue #22 enhancement fields stay intact.
+    found = await navigation.browser_wait_for_text("Smoke Test Page", timeout=5000)
+    assert found["status"] == "found"
+    assert found["found"] is True
+    assert "element" in found
+    assert "method" in found
+
+    # Timeout case: text never appears -> status == "timeout" AND found is False.
+    missing = await navigation.browser_wait_for_text(
+        "This text never appears on the page", timeout=500
+    )
+    assert missing["status"] == "timeout"
+    assert missing["found"] is False
+    assert "error" in missing
+
+
 async def test_tab_lifecycle(live_manager):
     """Regression guard for the tab-close AttributeError on the read-only
     ``page`` property."""

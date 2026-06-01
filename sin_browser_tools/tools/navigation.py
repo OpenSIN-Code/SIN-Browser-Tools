@@ -240,8 +240,11 @@ async def browser_wait_for_text(
         frame_url: Optional - watch inside an iframe matching this URL substring.
 
     Returns:
-        On success: {"found": True, "text": ..., "element": {tag, id, ...}, "method": ...}
-        On timeout: {"found": False, "text": ..., "error": "timeout"}
+        On success: {"status": "found", "found": True, "text": ..., "element": {tag, id, ...}, "method": ...}
+        On timeout: {"status": "timeout", "found": False, "text": ..., "error": "timeout"}
+
+        Note: both the legacy ``status`` key ("found"/"timeout"/"error") and the
+        Issue #22 ``found`` boolean are returned, so old and new callers both work.
 
     Example:
         # Wait for SPA step 2 content to appear after clicking "Continue"
@@ -255,7 +258,7 @@ async def browser_wait_for_text(
 
     frame, error = _resolve_frame(frame_name, frame_url)
     if error:
-        return {"found": False, "text": text, "error": error}
+        return {"status": "error", "found": False, "text": text, "error": error}
 
     args = {
         "targetText": text,
@@ -267,10 +270,11 @@ async def browser_wait_for_text(
     try:
         result = await frame.evaluate(_WAIT_FOR_TEXT_JS, args)
     except Exception as e:
-        return {"found": False, "text": text, "error": str(e)}
+        return {"status": "error", "found": False, "text": text, "error": str(e)}
 
     if result.get("found"):
         return {
+            "status": "found",  # backwards-compatible key (pre-#22 contract)
             "found": True,
             "text": text,
             "element": result.get("element"),
@@ -278,6 +282,7 @@ async def browser_wait_for_text(
             "method": result.get("method"),
         }
     return {
+        "status": "timeout",  # backwards-compatible key (pre-#22 contract)
         "found": False,
         "text": text,
         "error": f"Text '{text}' did not appear within {timeout}ms",
