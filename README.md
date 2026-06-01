@@ -9,10 +9,10 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Tests](https://img.shields.io/badge/Tests-51%20passing-brightgreen)
-![Tools](https://img.shields.io/badge/Tools-52-purple)
+![Tests](https://img.shields.io/badge/Tests-97%20passing-brightgreen)
+![Tools](https://img.shields.io/badge/Tools-64-purple)
 
-Browser automation library built for AI agents. Handles the hard parts: cross-origin iframes (OOPIFs), shadow DOM, native dialogs, and element targeting with stable ref-IDs.
+Browser automation library built for AI agents. Handles the hard parts: cross-origin iframes (OOPIFs), shadow DOM, native dialogs, element targeting with stable ref-IDs, **learning-by-doing playbooks**, and **macOS screen-recording + vision failure diagnosis**.
 
 > **Built for agents**: If you're an AI agent or configuring one, start with [AGENTS.md](./AGENTS.md) — it's written for you.
 
@@ -44,12 +44,14 @@ Browser automation library built for AI agents. Handles the hard parts: cross-or
 
 | Capability | What it means |
 |------------|---------------|
-| **52 native tools** | Navigation, interaction, accessibility, vision, extraction, dialogs, frames |
+| **64 native tools** | Navigation, interaction, accessibility, vision, extraction, dialogs, frames, learning, screen-recording |
 | **OOPIF support** | See and click inside cross-origin iframes (GMX, embedded checkouts) |
 | **Shadow DOM piercing** | Access content inside custom elements and shadow roots |
 | **Ref-ID system** | Stable `@e1`, `@e2` targeting that survives DOM changes |
 | **Frame scanning** | Find content in unnamed `about:blank` iframes |
-| **MCP compatible** | Works with Claude Desktop, Cursor, Cline, any MCP client |
+| **Learning-by-doing** | Record successful automations as playbooks; AI learns optimal sequences for repeated tasks |
+| **Screen-record + vision** | macOS screen recording with auto-trigger on failure; vision-based failure diagnosis (keyframes as Base64 PNGs) |
+| **MCP compatible** | Works with Claude Desktop, Cursor, Cline, OpenCode CLI, any MCP client |
 
 ## Installation
 

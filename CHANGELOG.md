@@ -56,8 +56,39 @@ All notable changes to SIN-Browser-Tools.
 - Deleted unreachable `sin_browser_tools/core.py` (shadowed by `core/` package).
 - Test command: `python test_all_tools.py` -> `python -m pytest`
 
+## [Unreleased]
+
+### Added
+- **OpenCode CLI Skills** (Issue #26):
+  - `sin-browser-automation`: Tool reference, correct sequencing, LOOK→DECIDE→ACT→VERIFY loop
+  - `sin-browser-skill-authoring`: Generate reusable skills from proven runs (+ templates)
+  - `sin-browser-learning`: Playbook system (record/suggest/list/compare), learn-by-doing, auto-ranking by success_rate
+- **macOS Screen Recording + Vision Failure Diagnosis**:
+  - `browser_screen_record_start/stop`: macOS screen recording (ffmpeg/screencapture auto-detect, window-region crop)
+  - `browser_screen_record_analyze`: Extract ordered Base64 PNG keyframes for the agent to visually diagnose failures
+  - Auto-record-on-failure hook: Start recording on first tool failure (macOS-only, `SIN_AUTO_RECORD_ON_FAILURE` env)
+- **Playbook System** (`sin_browser_tools/playbook.py`):
+  - `browser_playbook_suggest`: Retrieve best-known trajectories for a task (ranked by success_rate, avg_steps)
+  - `browser_playbook_record`: Save/update playbook variant with auto-ranking
+  - `browser_playbook_list/compare`: Browse and compare stored playbooks
+- **Skill Generator** (`sin_browser_tools/skills/generator.py`):
+  - `python -m sin_browser_tools.skills.generator --name <skill>`: Scaffold a new skill
+  - `--validate <name>`: Check SKILL.md frontmatter, name consistency, tool existence
+- **Configuration Wiring (B1-B4 Bugfixes)**:
+  - **B1**: `opensin_config.py` now reads all SIN_* environment variables (SIN_HEADLESS, SIN_STEALTH, SIN_VIEWPORT_*, SIN_CDP_URL, SIN_SESSION_DIR, SIN_AUTO_RECORD_ON_FAILURE, etc.) with proper parsing and defaults; python-dotenv optional.
+  - **B2+B3**: BrowserManager constructor now accepts Optional headless/stealth/executable_path (explicit args > config > defaults); signal handler modernized to use asyncio.get_running_loop() (no deprecated get_event_loop()).
+  - **B4**: _kill_zombie_processes now supports both POSIX (pkill -TERM -P) and Windows (taskkill /T) for safe, targeted cleanup.
+
+### Fixed
+- **B1-B4 Bugfixes**:
+  - Config environment variables (`SIN_HEADLESS`, etc.) were documented but never read — now wired into BrowserManager
+  - Signal handler used deprecated `asyncio.get_event_loop()` (broken in Python 3.12+) — now uses `asyncio.get_running_loop()`
+  - Zombie cleanup killed ALL Chromium processes (global pkill) — now kills only the specific browser PID tree
+- **Auto-record-on-failure** was never wired — now connected to MCP dispatcher (incl. soft {error}/{ok:false} results)
+- `browser_screen_record_analyze` was a placeholder — now returns ordered Base64 PNG keyframes for the vision-capable agent
+
 ### Documentation
-- Tool count: 46 -> 52
+- Tool count: 52 -> 64 (added learning, screen_record, and re-organized categorization)
 - Added `frames.md`, `network_intercept.md`, `smart_tools.md`
 - COOKBOOK: Recipes 9-10 for unnamed iframes and shadow DOM
 - API.md: Full reference for all 52 tools
