@@ -96,6 +96,8 @@ When unsure, call `browser_list_tools("keyword")` to search by name.
  | Click "succeeds" but nothing changes               | Element is inside an OOPIF / overlay   | Retry with `browser_click_cdp("@eN")`                              |
 | `ref @eN not found` / `unknown ref`                | You used a stale ref                   | Call `browser_snapshot` again, use a FRESH ref                     |
 | Snapshot is missing the email list / iframe content| Content lives in a cross-origin iframe | Use `browser_snapshot_full_oopif()` instead of `browser_snapshot`  |
+| Snapshot shows nothing, even with OOPIF           | Content in shadow DOM / custom elements | Use `browser_list_frames()` then `browser_snapshot_in_frame(frame_name, selector, pierce_shadow=True)` |
+| Need to find text in an unnamed iframe            | Email body in `about:blank` frame      | Use `browser_scan_frames(pattern="text")` or `browser_scan_frames(regex=r"\d{6}")` |
 | Element "not visible" / "not stable"               | Page still loading or element off-screen| `browser_wait_for_load`, then `browser_scroll`, then re-snapshot   |
 | Nothing happens after navigate                     | You snapshotted too early              | `browser_wait_for_load("networkidle")` then snapshot               |
 | A dialog/alert blocks everything                   | Native JS dialog is open               | `browser_dialog("accept")` or `browser_dialog("dismiss")`          |
@@ -117,6 +119,34 @@ the wrong layer. The fix is built in: use `browser_snapshot_full_oopif()` to
 SEE inside those frames, and `browser_click_cdp("@eN")` to CLICK inside them.
 You do not need to understand the internals — just use those two tools when the
 Error table tells you to.
+
+---
+
+## 5.5 Shadow DOM and Unnamed Iframes (advanced frame traversal)
+
+Some sites render content inside **shadow DOM** (custom elements like
+`<list-mail-item>`) or **unnamed iframes** (`about:blank` with no name). The
+accessibility snapshot cannot see these because:
+- Custom elements have no accessibility roles
+- `querySelectorAll` doesn't pierce shadow roots
+- Unnamed iframes cannot be targeted by name or URL
+
+When `browser_snapshot_full_oopif()` still shows nothing, use the frame tools:
+
+| Problem | Solution |
+|---------|----------|
+| Content in shadow DOM (custom elements) | `browser_snapshot_in_frame(frame_name="...", selector="list-mail-item", pierce_shadow=True)` |
+| Content in unnamed `about:blank` iframe | `browser_scan_frames(pattern="OTP code")` |
+| Need to find which frame has the data | `browser_list_frames()` then `browser_scan_frames()` |
+| Extract OTP codes from email body | `browser_scan_frames(regex=r"\d{6}")` |
+
+**Example: reading GMX email body in unnamed iframe**
+```text
+browser_click_cdp("@e42")            # open the email
+browser_wait_for_text("Reply")       # wait for it to load
+browser_scan_frames(pattern="verify")  # find the verification link in any frame
+# -> returns: {"matching_frames": 1, "frames": [{"text": "Click here to verify..."}]}
+```
 
 ---
 
