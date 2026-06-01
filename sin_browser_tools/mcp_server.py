@@ -72,6 +72,10 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
             }))]
 
         result = await fn(**arguments)
+        # Auto-record-on-failure: behandelt auch "weiche" Fehler, bei denen ein
+        # Tool kein Exception wirft, sondern {"error": ...} / {"ok": False}
+        # zurueckgibt. Niemals Screen-Recording-Tools selbst tracken (Endlos-Loop).
+        await _note_tool_result(name, result)
         return [types.TextContent(type="text", text=json.dumps(result, default=str))]
     except TypeError as e:
         # Almost always a bad/missing argument -> return the expected schema.
@@ -83,7 +87,41 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         }))]
     except Exception as e:
         logger.exception("Tool %s failed", name)
+        await _note_tool_failure_safe(name, str(e))
         return [types.TextContent(type="text", text=json.dumps({"error": str(e), "tool": name}))]
+
+
+async def _note_tool_result(name: str, result) -> None:
+    """Leite Erfolg/Misserfolg eines Tool-Ergebnisses an den Manager weiter."""
+    if name.startswith("browser_screen_record"):
+        return  # nie das Recording-Tool selbst tracken
+    inst = getattr(manager, "_instance", None)
+    if inst is None:
+        return
+    is_failure = isinstance(result, dict) and (
+        result.get("error") is not None or result.get("ok") is False
+        or result.get("status") == "error"
+    )
+    try:
+        if is_failure:
+            await inst.note_tool_failure(name, str(result.get("error") or result))
+        else:
+            inst.note_tool_success()
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+async def _note_tool_failure_safe(name: str, error: str) -> None:
+    """Wie oben, aber fuer den Exception-Pfad."""
+    if name.startswith("browser_screen_record"):
+        return
+    inst = getattr(manager, "_instance", None)
+    if inst is None:
+        return
+    try:
+        await inst.note_tool_failure(name, error)
+    except Exception:  # pragma: no cover - defensive
+        pass
 
 
 async def _run():

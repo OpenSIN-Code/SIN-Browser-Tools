@@ -51,6 +51,10 @@ class BrowserManager:
         self.vault = SessionVault(vault_path or cfg.session_dir)
         self.tracer = TraceLogger(trace_dir or cfg.trace_dir)
         self.auto_record_on_failure = cfg.auto_record_on_failure
+        # Zaehlt aufeinanderfolgende Tool-Fehler. Beim 1. Fehler startet (falls
+        # aktiviert und macOS) automatisch eine Screen-Aufnahme, damit der naechste
+        # Reproduktionsversuch auf Video ist. Reset bei Erfolg.
+        self._consecutive_failures = 0
 
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
@@ -304,6 +308,39 @@ class BrowserManager:
                 logger.warning("Cleanup completed with errors", errors=errors)
             else:
                 logger.info("Cleanup completed successfully")
+
+    def note_tool_success(self) -> None:
+        """Vom Dispatcher bei erfolgreichem Tool-Call aufgerufen. Reset der
+        Fehler-Zaehlung."""
+        self._consecutive_failures = 0
+
+    async def note_tool_failure(self, tool_name: str, error: str) -> None:
+        """Vom Dispatcher bei einem fehlgeschlagenen Tool-Call aufgerufen.
+
+        Startet beim ERSTEN Fehler (falls auto_record_on_failure aktiv und macOS)
+        automatisch eine Screen-Aufnahme, damit der naechste Reproduktionsversuch
+        auf Video festgehalten wird. Best-effort: jede Ausnahme hier wird
+        geschluckt, damit die eigentliche Fehlerbehandlung nicht gestoert wird.
+        """
+        self._consecutive_failures += 1
+        if not self.auto_record_on_failure:
+            return
+        if self._consecutive_failures != 1:
+            return
+        try:
+            from sin_browser_tools.core.screen_record import IS_MACOS
+            if not IS_MACOS:
+                return
+            from sin_browser_tools.tools import screen_record
+            res = await screen_record.browser_screen_record_start(
+                label="autofail-{}".format(tool_name), region="window"
+            )
+            logger.warning(
+                "auto screen-record started after tool failure",
+                tool=tool_name, error=error, recorder=res.get("status"),
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("auto-record failed to start", error=str(e))
 
     async def _kill_zombie_processes(self):
         """Killed NUR den von DIESEM Manager gestarteten Chromium-Prozessbaum.
