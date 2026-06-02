@@ -11,6 +11,7 @@ import inspect
 from sin_browser_tools.tools import (
     accessibility,
     dialog,
+    diagnostics,
     extraction,
     frames,
     interaction,
@@ -35,6 +36,7 @@ TOOL_MODULES = [
     screen_record,
     window,
     sessions,
+    diagnostics,
 ]
 
 _PY_TO_JSON = {

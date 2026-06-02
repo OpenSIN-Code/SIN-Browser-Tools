@@ -4,6 +4,38 @@ All notable changes to SIN-Browser-Tools.
 
 ## [Unreleased]
 
+### Added — Diagnostics & Evidence Layer (CDP)
+- **`core/evidence.py`**: CDP-based evidence engine. Opens a real `CDPSession`
+  and subscribes losslessly to Network, Runtime, Log, Page, Performance and
+  Target. Streams every event with `seq`, timestamps and a correlation
+  `step_id` to `events.jsonl`. Stores request/response bodies as artifacts.
+  Per-action before/after proof (screenshot, DOM dump, a11y snapshot, element
+  details: backendNodeId, box-model, exact click coordinates, outerHTML,
+  computed styles). Generates `report.md` + `report.html`. Adds
+  `EvidenceRecorder.note()` so the error path is recorded as evidence.
+- **`tools/diagnostics.py`**: 11 `browser_diag_*` MCP tools exposing the engine
+  (`start`, `stop`, `status`, `snapshot_all`, `element`, `action`, `query`,
+  `console`, `network`, `get_body`, `report`). Auto-discovered via the catalog.
+- **`.opencode/skills/browser-evidence/SKILL.md`**: runtime forcing-function —
+  no claim without evidence; mandatory start -> action -> query/console/network
+  -> stop -> report lifecycle; strict bug-diagnosis protocol.
+- **`.opencode/skills/browser-automation/SKILL.md`**: authoring skill for
+  building browser automations with debug capture baked in (mandatory skeletons,
+  capture checklist, anti-patterns, verification rule).
+- **`docs/DIAGNOSTICS.md`** + **`docs/code/*.md`**: user docs and per-file
+  companion docs (public API, data formats, pitfalls).
+
+### Changed — Diagnostics & Evidence Layer
+- **`tools/catalog.py`**: registered `diagnostics` in `TOOL_MODULES`.
+- **`tools/__init__.py`**: exported `diagnostics`.
+
+### Rationale
+The built-in `TraceLogger` only listened to `page.on("response")` and captured
+`url/status/method` — missing bodies, console logs, JS exceptions, lifecycle
+events, performance metrics and all per-action DOM/element details. That forced
+the agent to *guess* behavior instead of *establishing* it. The evidence layer
+closes this gap with a full CDP event stream.
+
 ### Fixed
 - **browser_wait_for_text return-contract regression** (Issue #28): the Issue #22
   enhancement switched the return dict from the `status` key ("found"/"timeout")
