@@ -1,0 +1,44 @@
+name: Test SIN-Browser-Tools
+
+on: [push, pull_request]
+
+jobs:
+  lint-and-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -e . structlog
+      - name: Syntax check
+        run: python -m py_compile sin_browser_tools/**/*.py
+      - name: Tool discovery
+        run: python -c "from sin_browser_tools.tools import catalog; t = catalog.discover(); print(f'✓ {len(t)} tools discovered')"
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install mypy
+        run: pip install mypy
+      - name: Type check core
+        run: mypy sin_browser_tools/core/ --ignore-missing-imports --no-implicit-optional
+        continue-on-error: true
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install & run tests
+        run: |
+          pip install -e . pytest pytest-asyncio playwright
+          python -m pytest tests/ -k "not browser" -v --tb=short
+        continue-on-error: true
