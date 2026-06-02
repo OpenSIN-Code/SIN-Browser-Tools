@@ -50,7 +50,7 @@ class PIIRedactor:
 
     PATTERNS = {
         "email": re.compile(
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b(?!\|)"
         ),
         "phone": re.compile(
             r"\b(?:\+?49|0)[\s\-]?\(?[0-9]{2,5}\)?[\s\-]?[0-9]{3,8}[\s\-]?[0-9]{0,8}\b"

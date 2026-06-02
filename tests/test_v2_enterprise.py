@@ -216,6 +216,14 @@ def test_find_by_text_ignores_unlabeled_and_missing():
     assert reg.find_by_text("nonexistent") == []
 
 
+def test_pii_redaction_does_not_match_pipe_in_email_tld():
+    """Email redaction rejects pipe characters inside the TLD."""
+    redactor = PIIRedactor()
+
+    assert redactor.redact("mail me at foo@example.do|main") == "mail me at foo@example.do|main"
+    assert redactor.redact("mail me at foo@example.domain") == "mail me at [EMAIL_REDACTED]"
+
+
 @pytest.mark.asyncio
 async def test_click_by_text_fallback_to_live_locator():
     """Issue #5: click_by_text should try a live locator if registry misses."""
