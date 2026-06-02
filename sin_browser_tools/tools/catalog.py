@@ -37,6 +37,14 @@ TOOL_MODULES = [
     window,
     sessions,
     diagnostics,
+    downloads,
+    network_waits,
+    assertions,
+    cookies,
+    extract,
+    captcha,
+    network_control,
+    identity,
 ]
 
 _PY_TO_JSON = {

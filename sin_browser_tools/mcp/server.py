@@ -12,6 +12,7 @@ from mcp.types import Tool, TextContent
 import structlog
 
 from sin_browser_tools.core.manager import BrowserManager
+from sin_browser_tools.core.result import normalize_result
 from sin_browser_tools.tools.smart_tools import SmartBrowserTools
 
 logger = structlog.get_logger(__name__)
@@ -176,6 +177,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         else:
             raise ValueError(f"Unknown tool: {name}")
 
+        result = normalize_result(result)
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 
     except Exception as e:
@@ -183,7 +185,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=json.dumps({"error": str(e), "tool": name}, indent=2),
+                text=json.dumps({"ok": False, "error": str(e), "tool": name}, indent=2),
             )
         ]
 

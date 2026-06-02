@@ -22,6 +22,7 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
 from .core import manager
+from .core.result import normalize_result
 from .tools import catalog
 
 logger = logging.getLogger("sin-browser-mcp")
@@ -76,6 +77,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         # Tool kein Exception wirft, sondern {"error": ...} / {"ok": False}
         # zurueckgibt. Niemals Screen-Recording-Tools selbst tracken (Endlos-Loop).
         await _note_tool_result(name, result)
+        result = normalize_result(result)
         return [types.TextContent(type="text", text=json.dumps(result, default=str))]
     except TypeError as e:
         # Almost always a bad/missing argument -> return the expected schema.
@@ -88,7 +90,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
     except Exception as e:
         logger.exception("Tool %s failed", name)
         await _note_tool_failure_safe(name, str(e))
-        return [types.TextContent(type="text", text=json.dumps({"error": str(e), "tool": name}))]
+        return [types.TextContent(type="text", text=json.dumps({"ok": False, "error": str(e), "tool": name}))]
 
 
 async def _note_tool_result(name: str, result) -> None:
