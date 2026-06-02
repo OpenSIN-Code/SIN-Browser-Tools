@@ -49,8 +49,11 @@ class PIIRedactor:
     """
 
     PATTERNS = {
+        # BUGFIX #34: Email regex had [A-Z|a-z] with pipe literal in char class.
+        # The pipe was being treated as a literal character, not alternation.
+        # Fixed to [A-Za-z] for proper character class.
         "email": re.compile(
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
         ),
         "phone": re.compile(
             r"\b(?:\+?49|0)[\s\-]?\(?[0-9]{2,5}\)?[\s\-]?[0-9]{3,8}[\s\-]?[0-9]{0,8}\b"
@@ -74,6 +77,9 @@ class PIIRedactor:
     }
 
     # Keys, die niemals an LLMs gehen sollten (komplett redigiert)
+    # BUGFIX #32: Use exact key matching instead of substring matching.
+    # Previously "cookies_enabled" would match "cookie" and get redacted.
+    # Now we check for exact key matches (case-insensitive).
     BLOCKED_KEYS = {
         "password",
         "csrf",
@@ -84,6 +90,12 @@ class PIIRedactor:
         "api_key",
         "authorization",
         "cookie",
+        "cookies",  # Added explicit plural form
+        "session_id",
+        "sessionid",
+        "auth_token",
+        "access_token",
+        "refresh_token",
     }
 
     def __init__(
@@ -139,7 +151,10 @@ class PIIRedactor:
         for key, value in data.items():
             key_lower = key.lower()
 
-            if any(blocked in key_lower for blocked in self.BLOCKED_KEYS):
+            # BUGFIX #32: Use exact key matching instead of substring matching.
+            # Previously "cookies_enabled" matched "cookie" and got [REDACTED].
+            # Now we only redact if the exact key (lowercase) is in BLOCKED_KEYS.
+            if key_lower in self.BLOCKED_KEYS:
                 result[key] = "[REDACTED]"
                 stats.custom += 1
                 continue

@@ -3,6 +3,13 @@
 __version__ = "2.0.0"
 __author__ = "OpenSIN Team"
 
+# BUGFIX #29: Configure structlog BEFORE any module imports call get_logger().
+# Without this, structlog uses a default BoundLogger that formats KV args via
+# repr(), producing logs unusable for Loki/Datadog ingestion.
+from sin_browser_tools.core.logging_config import ensure_configured, configure_logging
+
+ensure_configured()
+
 from sin_browser_tools.core.manager import BrowserManager
 from sin_browser_tools.core.session_vault import SessionVault
 from sin_browser_tools.core.frame_traversal import UnifiedFrameTraverser
@@ -27,4 +34,5 @@ __all__ = [
     "NetworkInterceptor",
     "intercept_gmx_emails",
     "intercept_api_data",
+    "configure_logging",
 ]

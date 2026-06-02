@@ -686,7 +686,10 @@ async def browser_click_checkbox_by_text(
     args = {"label": label_text, "exact": exact, "maxDepth": 15}
 
     # SPA-safe wait: poll the shadow-piercing matcher until the label exists.
-    deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+    # BUGFIX #30: asyncio.get_event_loop() is deprecated in 3.12+ and raises
+    # RuntimeError when no running loop exists. Use get_running_loop() instead.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_ms / 1000
     last_exc = None
     while True:
         try:
@@ -696,7 +699,7 @@ async def browser_click_checkbox_by_text(
             last_exc = str(e)
         if present:
             break
-        if asyncio.get_event_loop().time() >= deadline:
+        if loop.time() >= deadline:
             return {
                 "success": False,
                 "method": None,
@@ -1041,7 +1044,9 @@ async def browser_click_checkbox_react(
 
     # SPA-safe wait: reuse the shadow-piercing presence probe until the label
     # exists, then click.
-    deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+    # BUGFIX #30: asyncio.get_event_loop() is deprecated in 3.12+.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_ms / 1000
     last_exc = None
     while True:
         try:
@@ -1051,7 +1056,7 @@ async def browser_click_checkbox_react(
             last_exc = str(e)
         if present:
             break
-        if asyncio.get_event_loop().time() >= deadline:
+        if loop.time() >= deadline:
             return {
                 "success": False,
                 "method": None,

@@ -37,7 +37,10 @@ class ScreenRecorder:
 
     def __init__(self, out_dir: str = ".sin_recordings"):
         self.out_dir = Path(out_dir)
-        self.out_dir.mkdir(exist_ok=True)
+        # BUGFIX #36: Use parents=True to create nested directories.
+        # Previously mkdir without parents=True would fail if parent dirs
+        # didn't exist (e.g., "/deep/nested/.sin_recordings").
+        self.out_dir.mkdir(parents=True, exist_ok=True)
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._path: Optional[Path] = None
         self._backend = self._detect_backend()
@@ -136,8 +139,23 @@ class ScreenRecorder:
         if not shutil.which("ffmpeg"):
             logger.debug("ffmpeg not found, cannot extract frames")
             return []
-        frames_dir = Path(video_path).with_suffix("")
-        frames_dir.mkdir(exist_ok=True)
+        # BUGFIX #37: Use unique frame directory per extraction to prevent
+        # collision when extract_frames is called multiple times on same video.
+        # Previously, all extractions used video_path.with_suffix("") which would
+        # overwrite frames from previous extractions.
+        import time
+        base_dir = Path(video_path).with_suffix("")
+        unique_suffix = f"_{int(time.time() * 1000)}"
+        frames_dir = base_dir.parent / f"{base_dir.name}{unique_suffix}"
+        # BUGFIX #36: Use parents=True for nested paths
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        
+        # BUGFIX #39: Check that video_path is not stdin marker "-" which would
+        # cause ffmpeg to hang waiting for input that never comes.
+        if video_path == "-" or not Path(video_path).exists():
+            logger.warning("Invalid video path for frame extraction", video_path=video_path)
+            return []
+        
         pattern = str(frames_dir / "frame-%03d.png")
         rc, _, _ = await _run(
             [

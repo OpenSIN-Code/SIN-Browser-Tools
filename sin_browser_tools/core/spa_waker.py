@@ -31,9 +31,12 @@ class SPAWaker:
         """
         prev_hash = ""
         stable_count = 0
-        start = asyncio.get_event_loop().time()
+        # BUGFIX #30: asyncio.get_event_loop() is deprecated in 3.12+ and raises
+        # RuntimeError when no running loop exists. Use get_running_loop() instead.
+        loop = asyncio.get_running_loop()
+        start = loop.time()
 
-        while (asyncio.get_event_loop().time() - start) * 1000 < timeout_ms:
+        while (loop.time() - start) * 1000 < timeout_ms:
             try:
                 curr_hash = await page.evaluate("""
                     () => {

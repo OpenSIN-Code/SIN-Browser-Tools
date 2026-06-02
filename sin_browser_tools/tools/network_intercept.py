@@ -110,8 +110,11 @@ class NetworkInterceptor:
         self, pattern: str, timeout_ms: int = 10000
     ) -> Optional[InterceptedResponse]:
         """Wartet, bis eine Response mit Pattern eintrifft."""
-        start = asyncio.get_event_loop().time()
-        while (asyncio.get_event_loop().time() - start) * 1000 < timeout_ms:
+        # BUGFIX #30: asyncio.get_event_loop() is deprecated in 3.12+ and raises
+        # RuntimeError when no running loop exists. Use get_running_loop() instead.
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        while (loop.time() - start) * 1000 < timeout_ms:
             matches = [r for r in self._intercepted if pattern in r.url]
             if matches:
                 return matches[-1]

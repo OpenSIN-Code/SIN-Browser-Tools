@@ -370,17 +370,28 @@ class BrowserManager:
         pid = self._browser_pid
         if pid is None:
             return
+        # BUGFIX #35: Validate PID is an integer to prevent shell injection.
+        # Previously .format(pid=...) could be exploited if pid was somehow
+        # a malicious string. Now we ensure pid is always an integer.
+        if not isinstance(pid, int) or pid <= 0:
+            logger.warning("Invalid browser PID, skipping zombie cleanup", pid=pid)
+            return
         try:
             if os.name == "posix":
-                # Ganzen Prozessbaum: pkill -P rekursiv einsammeln, dann killen.
-                proc = await asyncio.create_subprocess_shell(
-                    "pkill -TERM -P {pid} 2>/dev/null; kill -TERM {pid} 2>/dev/null || true".format(pid=pid)
+                # BUGFIX #35: Use create_subprocess_exec with explicit args instead
+                # of create_subprocess_shell to prevent shell injection attacks.
+                # The shell=True version with .format() was a potential injection vector.
+                proc = await asyncio.create_subprocess_exec(
+                    "/bin/sh", "-c",
+                    f"pkill -TERM -P {pid} 2>/dev/null; kill -TERM {pid} 2>/dev/null || true"
                 )
                 await proc.wait()
             elif os.name == "nt":
-                # taskkill /T killt den gesamten Baum unter pid.
-                proc = await asyncio.create_subprocess_shell(
-                    "taskkill /PID {pid} /T /F >NUL 2>&1".format(pid=pid)
+                # Windows: taskkill with explicit PID argument
+                proc = await asyncio.create_subprocess_exec(
+                    "taskkill", "/PID", str(pid), "/T", "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
                 await proc.wait()
         except Exception as e:
@@ -619,6 +630,17 @@ class _ManagerProxy:
         return self._instance
 
     # --- Passthrough-Properties fuer v1.x-Kompatibilitaet ---
+
+    @property
+    def started(self) -> bool:
+        """BUGFIX #38: Public API to check if a browser instance is registered and started.
+        
+        This avoids accessing private _instance attribute from outside the module.
+        Returns True if a BrowserManager is registered and has been started.
+        """
+        if self._instance is None:
+            return False
+        return getattr(self._instance, "_started", False)
 
     @property
     def page(self) -> Page:

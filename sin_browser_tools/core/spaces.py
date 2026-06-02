@@ -173,21 +173,30 @@ class HammerspoonBackend(SpaceBackend):
     async def _window_id(self, pid: int, title: Optional[str]) -> Optional[str]:
         # Hammerspoon adressiert Fenster über hs.window:id() (CGWindowID).
         if pid:
+            # BUGFIX #31: Use Lua string escaping to prevent format-string injection.
+            # Previously .format(pid=pid) could be exploited if pid came from untrusted
+            # input (unlikely but defensive). Now we validate pid is an integer and
+            # use %d formatting in Lua which is injection-safe.
+            if not isinstance(pid, int):
+                return None
             lua = (
-                "local app=hs.application.applicationForPID({pid});"
+                "local app=hs.application.applicationForPID(%d);"
                 "if not app then return '' end;"
                 "local w=app:mainWindow();"
                 "if not w then local ws=app:allWindows(); w=ws[1] end;"
                 "if not w then return '' end;return tostring(w:id())"
-            ).format(pid=pid)
+            ) % pid
             rc, out, _ = await self._hs(lua)
             if rc == 0 and out.strip().isdigit():
                 return out.strip()
         if title:
+            # BUGFIX #31: Sanitize title to prevent Lua injection via [[ ]] strings.
+            # We escape ]] sequences and use Lua's long-string quoting safely.
+            safe_title = title.replace("]]", "]]..']]'..[[")
             lua = (
-                "local w=hs.window.find([[{title}]]);"
+                "local w=hs.window.find([[%s]]);"
                 "if not w then return '' end;return tostring(w:id())"
-            ).format(title=title.replace("]]", ""))
+            ) % safe_title
             rc, out, _ = await self._hs(lua)
             if rc == 0 and out.strip().isdigit():
                 return out.strip()
