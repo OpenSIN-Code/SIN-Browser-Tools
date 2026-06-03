@@ -10,17 +10,25 @@ import inspect
 
 from sin_browser_tools.tools import (
     accessibility,
+    assertions,
+    captcha,
+    cookies,
     dialog,
     diagnostics,
+    downloads,
+    extract,
     extraction,
     frames,
+    identity,
     interaction,
-    navigation,
-    vision,
     learning,
+    navigation,
+    network_control,
+    network_waits,
     screen_record,
-    window,
     sessions,
+    vision,
+    window,
 )
 
 # Order matters only for stable, readable listings.
