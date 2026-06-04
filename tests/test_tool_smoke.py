@@ -402,6 +402,89 @@ async def test_snapshot_in_frame_by_url_substring(live_manager):
 
 
 # ---------------------------------------------------------------------------
+# Frame-scoped interaction — click/type shadow-DOM elements (Issue #12)
+# ---------------------------------------------------------------------------
+
+async def test_click_in_frame_clicks_shadow_mail_item_by_index(live_manager):
+    # The whole point of Issue #12: actually CLICK a custom-element row nested in
+    # open shadow DOM of a same-process iframe (a locator pierces it; a plain
+    # evaluate().click() would not reach it reliably).
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", index=1, frame_name="mail"
+    )
+    assert res["status"] == "clicked", res
+    assert res["matched"] == 3
+    # The fixture row records its subject on click via document.title.
+    title = await frames.browser_eval_in_frame("document.title", frame_name="mail")
+    assert title["result"] == "clicked:Welcome aboard"
+
+
+async def test_click_in_frame_text_filter_targets_right_row(live_manager):
+    # sender_filter use case: narrow the rows by their text, then click.
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", text_filter="receipt", frame_name="mail"
+    )
+    assert res["status"] == "clicked", res
+    assert res["matched"] == 1  # filtered down to a single row
+    # (res["text"] is best-effort and empty for shadow-host custom elements
+    # whose text lives in the shadow root; the title check below is authoritative.)
+    title = await frames.browser_eval_in_frame("document.title", frame_name="mail")
+    assert title["result"] == "clicked:Your receipt"
+
+
+async def test_snapshot_index_maps_to_click_index(live_manager):
+    # The index returned by browser_snapshot_in_frame must address the same row
+    # when fed back to browser_click_in_frame.
+    snap = await frames.browser_snapshot_in_frame(
+        frame_name="mail", selector="list-mail-item"
+    )
+    target = next(i for i in snap["items"] if i["text"] == "Welcome aboard")
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", index=target["index"], frame_name="mail"
+    )
+    assert res["status"] == "clicked", res
+    title = await frames.browser_eval_in_frame("document.title", frame_name="mail")
+    assert title["result"] == "clicked:Welcome aboard"
+
+
+async def test_click_in_frame_no_match_returns_error(live_manager):
+    res = await frames.browser_click_in_frame(
+        selector="does-not-exist-xyz", frame_name="mail"
+    )
+    assert "error" in res
+
+
+async def test_click_in_frame_index_out_of_range_errors(live_manager):
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", index=99, frame_name="mail"
+    )
+    assert "error" in res
+    assert res["matched"] == 3
+
+
+async def test_click_in_frame_unknown_frame_errors(live_manager):
+    res = await frames.browser_click_in_frame(
+        selector="list-mail-item", frame_name="does-not-exist"
+    )
+    assert "error" in res
+
+
+async def test_type_in_frame_fills_main_frame_input(live_manager):
+    # No frame_name/url -> main frame. Proves the locator-based type path works
+    # and clears existing content by default.
+    res = await frames.browser_type_in_frame(selector="#inp", text="hello frame")
+    assert res["status"] == "typed", res
+    assert await live_manager.page.input_value("#inp") == "hello frame"
+
+
+async def test_type_in_frame_unknown_frame_errors(live_manager):
+    res = await frames.browser_type_in_frame(
+        selector="#inp", text="x", frame_name="does-not-exist"
+    )
+    assert "error" in res
+
+
+# ---------------------------------------------------------------------------
 # browser_scan_frames — scan ALL frames for text (Issue #15)
 # ---------------------------------------------------------------------------
 

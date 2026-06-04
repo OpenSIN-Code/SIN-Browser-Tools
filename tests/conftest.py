@@ -33,12 +33,11 @@ MAIL_FRAME_HTML = """<!doctype html><html><body>
 // GMX "unnamed/empty frame" path; adding rendered text would mask that.
 customElements.define('list-mail-item', class extends HTMLElement {
   constructor(){ super(); const r=this.attachShadow({mode:'open'});
-    r.innerHTML = '<div class="subject">'+this.getAttribute('subject')+'</div>';
-    // Click side effect so browser_click_in_frame can be verified: record the
-    // subject of the opened mail on a window var (no visible DOM text added).
-    this.addEventListener('click', () => {
-      window.__opened = this.getAttribute('subject');
-    }); }
+    const s=this.getAttribute('subject');
+    r.innerHTML = '<div class="subject">'+s+'</div>';
+    // Record clicks so the Issue #12 frame-click tests can assert the right row
+    // (a shadow-DOM custom element) actually received a trusted click.
+    this.addEventListener('click', function(){ document.title = 'clicked:'+s; }); }
 });
 customElements.define('mail-list-container', class extends HTMLElement {
   constructor(){ super(); const r=this.attachShadow({mode:'open'});

@@ -34,7 +34,9 @@ from sin_browser_tools.core import manager
 # ---------------------------------------------------------------------------
 _WALK_JS = r"""
 (args) => {
-  const { selector, pierceShadow, pierceIframes, minLen, maxLen, maxItems, maxDepth } = args;
+  const {
+    selector, pierceShadow, pierceIframes, minLen, maxLen, maxItems, maxDepth
+  } = args;
   const items = [];
   let closedShadowHosts = 0;
   let openShadowRoots = 0;
@@ -56,6 +58,11 @@ _WALK_JS = r"""
       if (text.length < minLen || text.length > maxLen) return;
     }
     items.push({
+      // Ordinal position in this result list. For a selector-scoped snapshot the
+      // walk visits matches in document order, the same order Playwright's
+      // shadow-piercing locator uses, so this index can be fed straight to
+      // browser_click_in_frame(selector=..., index=...) to act on this element.
+      index: items.length,
       tag: el.tagName ? el.tagName.toLowerCase() : '(unknown)',
       id: el.id || null,
       classes: el.classList ? Array.from(el.classList).slice(0, 6) : [],
@@ -159,13 +166,19 @@ def _resolve_frame(frame_name: str = None, frame_url: str = None):
         for f in page.frames:
             if (f.name or "") == frame_name:
                 return f, None
-        return None, f"No frame with name={frame_name!r}. Call browser_list_frames to see available frames."
+        return None, (
+            f"No frame with name={frame_name!r}. "
+            "Call browser_list_frames to see available frames."
+        )
     if frame_url:
         needle = frame_url.lower()
         # Prefer the most-specific (longest URL) match for determinism.
         matches = [f for f in page.frames if needle in (f.url or "").lower()]
         if not matches:
-            return None, f"No frame whose URL contains {frame_url!r}. Call browser_list_frames to see available frames."
+            return None, (
+                f"No frame whose URL contains {frame_url!r}. "
+                "Call browser_list_frames to see available frames."
+            )
         matches.sort(key=lambda f: len(f.url or ""), reverse=True)
         return matches[0], None
     return page.main_frame, None
@@ -303,120 +316,181 @@ async def browser_snapshot_in_frame(
 
 
 # ---------------------------------------------------------------------------
-# browser_click_in_frame — click a (shadow-DOM) element inside ONE frame
-# (Issue #12: GMX/web.de mail rows are <list-mail-item> custom elements nested
-# in OPEN shadow DOM inside a same-process "mail" iframe; browser_click /
-# browser_click_by_text operate on the main page's snapshot registry and never
-# reach them).
+# Frame-scoped interaction — click/type shadow-DOM elements (Issue #12)
+#
+# browser_snapshot_in_frame can READ shadow-DOM content, but agents also need to
+# ACT on it (e.g. open a GMX email row). A page/frame `evaluate(el => el.click())`
+# is unreliable for these custom elements, whereas Playwright *locators* pierce
+# OPEN shadow roots natively and dispatch trusted input events — exactly the
+# `frame.locator('list-mail-item').first.click()` workaround Issue #12 describes.
 # ---------------------------------------------------------------------------
+
+
+def _filter_locator(locator, text_filter: str):
+    """Optionally narrow a locator to elements containing ``text_filter``.
+
+    Mirrors the ``sender_filter`` use case in Issue #12 (pick the row from a
+    given sender). ``has_text`` does a case-insensitive substring match and,
+    like the base locator, sees through open shadow DOM.
+    """
+    if text_filter:
+        return locator.filter(has_text=text_filter)
+    return locator
+
 
 async def browser_click_in_frame(
     selector: str,
+    index: int = 0,
     frame_name: str = None,
     frame_url: str = None,
-    index: int = 0,
-    text: str = None,
-    timeout_ms: int = 5000,
+    text_filter: str = None,
+    timeout: float = 5000,
 ) -> dict:
-    """Click an element inside a specific frame, piercing OPEN shadow DOM (Issue #12).
+    """Click an element (incl. open shadow DOM) inside a specific frame (Issue #12).
 
-    This is the click counterpart to ``browser_snapshot_in_frame``. It targets
-    the GMX/web.de case where message rows are custom elements
-    (e.g. ``list-mail-item``) nested in open shadow DOM inside a same-process
-    ``mail`` iframe, which the main-page click tools cannot reach.
-
-    Playwright's CSS locator engine pierces OPEN shadow roots automatically and
-    routes the click into the correct (possibly cross-origin) frame, so this is
-    far more reliable than ``element.click()`` via ``evaluate`` (which silently
-    fails on many shadow-DOM elements).
+    Uses a Playwright locator, which pierces OPEN shadow roots and dispatches a
+    trusted click — so it reaches custom-element rows that ``browser_click`` /
+    ``evaluate(...).click()`` cannot (e.g. GMX ``list-mail-item`` email rows
+    nested several shadow levels deep in the ``mail`` iframe).
 
     Targeting:
-      - ``selector`` -- CSS selector for the element(s) to click
-        (e.g. ``"list-mail-item"``). Required.
-      - ``frame_name`` -- exact iframe name (e.g. ``"mail"``).
-      - ``frame_url``  -- substring of the frame URL (e.g. ``"webmailer.gmx.net"``).
-      - neither name nor url -- the main frame.
-      Discover frames first with ``browser_list_frames``.
+      - ``selector``    -- CSS selector resolved with shadow piercing
+        (e.g. ``"list-mail-item"``).
+      - ``index``       -- which match to click when several exist (0-based,
+        document order; matches ``browser_snapshot_in_frame`` item ``index``).
+      - ``text_filter`` -- only consider matches whose text contains this string
+        (case-insensitive), e.g. a sender or subject. Applied before ``index``.
+      - ``frame_name`` / ``frame_url`` -- which frame (see ``_resolve_frame``);
+        neither = main frame. Discover frames with ``browser_list_frames``.
 
-    Selection among matches:
-      - ``text`` -- if given, only elements whose (rendered, shadow-inclusive)
-        text contains this substring are considered. Use it as a sender/subject
-        filter, e.g. ``text="Invoice"``.
-      - ``index`` -- which of the (optionally text-filtered) matches to click,
-        0-based (default 0 = first).
-
-    Returns ``{"status": "clicked", "frame": {...}, "selector", "index",
-    "match_count", "clicked_text"}`` on success, or ``{"error": ...}`` with a
-    hint (e.g. when nothing matched or the index is out of range).
+    Returns the clicked element's tag/text and how many candidates matched so the
+    agent can confirm it acted on the right row, or a helpful ``error`` (unknown
+    frame, no match, or ``index`` out of range) instead of raising.
     """
     frame, error = _resolve_frame(frame_name, frame_url)
     if error:
         return {"error": error}
 
     try:
-        locator = frame.locator(selector)
-        if text:
-            locator = locator.filter(has_text=text)
-
-        match_count = await locator.count()
-        if match_count == 0:
+        locator = _filter_locator(frame.locator(selector), text_filter)
+        matched = await locator.count()
+        if matched == 0:
             return {
                 "error": (
                     f"No element matched selector {selector!r}"
-                    + (f" with text containing {text!r}" if text else "")
-                    + " in this frame."
+                    + (f" with text_filter {text_filter!r}" if text_filter else "")
+                    + " in this frame. Use browser_snapshot_in_frame to see what is "
+                    "reachable, and remember closed shadow roots are not clickable."
                 ),
                 "frame": _frame_descriptor(frame),
-                "hint": (
-                    "Verify the frame with browser_list_frames and the selector "
-                    "with browser_snapshot_in_frame. Remember: closed shadow "
-                    "roots are not reachable."
-                ),
             }
-        if index < 0 or index >= match_count:
+        if index < 0 or index >= matched:
             return {
                 "error": (
-                    f"index {index} is out of range; {match_count} element(s) "
-                    f"matched {selector!r}"
-                    + (f" with text {text!r}" if text else "")
-                    + "."
+                    f"index {index} is out of range: {matched} element(s) matched "
+                    f"{selector!r}. Valid indices are 0..{matched - 1}."
                 ),
+                "matched": matched,
                 "frame": _frame_descriptor(frame),
-                "match_count": match_count,
             }
 
         target = locator.nth(index)
+        # Capture identifying text BEFORE clicking — the click may navigate or
+        # detach the element, after which inner_text() would fail.
         try:
-            await target.scroll_into_view_if_needed(timeout=timeout_ms)
+            text = (
+                await target.inner_text(timeout=timeout)
+            ).replace("\n", " ").strip()[:200]
         except Exception:
-            pass  # best-effort; click still hit-tests + auto-scrolls
+            text = None
 
-        # Capture the row's text before clicking, for an observable result the
-        # agent can confirm against. Custom elements render their content inside
-        # a shadow root, so inner_text() on the host is empty -- read the open
-        # shadow root too (this is the GMX <list-mail-item> case).
-        try:
-            clicked_text = await target.evaluate(
-                """(el) => {
-                    let t = (el.innerText || el.textContent || '');
-                    if (!t.trim() && el.shadowRoot) {
-                        t = el.shadowRoot.textContent || '';
-                    }
-                    return t.replace(/\\s+/g, ' ').trim().slice(0, 120);
-                }"""
-            )
-        except Exception:
-            clicked_text = None
-
-        await target.click(timeout=timeout_ms)
+        await target.click(timeout=timeout)
         return {
             "status": "clicked",
             "frame": _frame_descriptor(frame),
             "selector": selector,
             "index": index,
-            "match_count": match_count,
-            "clicked_text": clicked_text,
-            "method": "frame_locator_pierce",
+            "matched": matched,
+            "text": text,
+            "method": "frame_locator_click",
+        }
+    except Exception as e:
+        return {"error": str(e), "frame": _frame_descriptor(frame)}
+
+
+async def browser_type_in_frame(
+    selector: str,
+    text: str,
+    index: int = 0,
+    frame_name: str = None,
+    frame_url: str = None,
+    text_filter: str = None,
+    clear: bool = True,
+    submit: bool = False,
+    timeout: float = 5000,
+) -> dict:
+    """Type into an input inside a specific frame, piercing open shadow DOM (Issue #12).
+
+    The locator-based companion to ``browser_click_in_frame`` for forms whose
+    fields live in a same-process iframe and/or open shadow DOM (e.g. a search or
+    login box rendered as a custom element).
+
+    Args:
+      - ``selector``    -- CSS selector for the field (shadow-piercing).
+      - ``text``        -- text to enter.
+      - ``index``       -- which match when several exist (0-based, document order).
+      - ``text_filter`` -- restrict matches by surrounding text (case-insensitive).
+      - ``frame_name`` / ``frame_url`` -- which frame; neither = main frame.
+      - ``clear``       -- replace existing value via ``fill`` (default True). When
+        False, focus the field and append the text instead.
+      - ``submit``      -- press Enter after typing (e.g. to submit a search).
+
+    Returns ``status: "typed"`` with the matched count, or a helpful ``error``
+    (unknown frame, no match, or ``index`` out of range) instead of raising.
+    """
+    frame, error = _resolve_frame(frame_name, frame_url)
+    if error:
+        return {"error": error}
+
+    try:
+        locator = _filter_locator(frame.locator(selector), text_filter)
+        matched = await locator.count()
+        if matched == 0:
+            return {
+                "error": (
+                    f"No element matched selector {selector!r}"
+                    + (f" with text_filter {text_filter!r}" if text_filter else "")
+                    + " in this frame. Use browser_snapshot_in_frame to inspect it."
+                ),
+                "frame": _frame_descriptor(frame),
+            }
+        if index < 0 or index >= matched:
+            return {
+                "error": (
+                    f"index {index} is out of range: {matched} element(s) matched "
+                    f"{selector!r}. Valid indices are 0..{matched - 1}."
+                ),
+                "matched": matched,
+                "frame": _frame_descriptor(frame),
+            }
+
+        target = locator.nth(index)
+        if clear:
+            await target.fill(text, timeout=timeout)
+        else:
+            await target.click(timeout=timeout)
+            await target.type(text, delay=30)
+        if submit:
+            await target.press("Enter")
+
+        return {
+            "status": "typed",
+            "frame": _frame_descriptor(frame),
+            "selector": selector,
+            "index": index,
+            "matched": matched,
+            "submitted": submit,
+            "method": "frame_locator_type",
         }
     except Exception as e:
         return {"error": str(e), "frame": _frame_descriptor(frame)}
@@ -480,7 +554,8 @@ async def browser_scan_frames(
         try:
             # Try multiple extraction methods for robustness
             text = await frame.evaluate(
-                "() => document.body ? document.body.innerText || document.body.textContent || '' : ''"
+                "() => document.body ? "
+                "document.body.innerText || document.body.textContent || '' : ''"
             )
         except Exception:
             # Frame may be cross-origin or detached
@@ -520,8 +595,10 @@ async def browser_scan_frames(
             "text_length": text_length,
         }
         if matches:
-            frame_info["matches"] = matches[:20]  # Limit matches
-            frame_info["match_count"] = len(matches) if len(matches) <= 20 else "20+ (showing first 20)"
+            frame_info["matches"] = matches[:20]
+            frame_info["match_count"] = (
+                len(matches) if len(matches) <= 20 else "20+ (showing first 20)"
+            )
         results.append(frame_info)
 
     result = {
@@ -534,7 +611,8 @@ async def browser_scan_frames(
         hints = []
         if pattern or regex:
             hints.append(
-                f"No frames contained {'regex ' + repr(regex) if regex else 'pattern ' + repr(pattern)}. "
+                f"No frames contained "
+                f"{'regex ' + repr(regex) if regex else 'pattern ' + repr(pattern)}. "
                 "Try browser_scan_frames() without a filter to see all frame contents, "
                 "or wait for the content to load with browser_wait."
             )

@@ -46,51 +46,18 @@ closes this gap with a full CDP event stream.
   compatibility without losing the Shadow DOM/element-info enhancements.
 
 ### Added
-- **browser_wait_for_text enhancements** (Issue #22):
-  - Shadow DOM support: Searches across OPEN shadow roots
-  - Element info return: Returns tag, id, className of first matching element
-  - Configurable polling: 500ms default interval (per spec), adjustable via `poll_interval`
-  - Frame support: `frame_name` and `frame_url` parameters for iframe targeting
-  - Clear timeout errors with method tracking
-- **Window Control** (Issue #27 F1):
-  - `browser_get_window_bounds` - Read window position/size/state
-  - `browser_set_window_bounds` - Set exact pixel bounds
-  - `browser_set_window_mode` - Preset sizes (small/medium/large/maximized/fullscreen)
-  - `browser_maximize_window`, `browser_minimize_window`, `browser_fullscreen_window`, `browser_restore_window`
-  - `browser_move_window` - Position window on screen
-  - New `core/window.py` with CDP-based `WindowController`
-- **macOS Spaces Control** (Issue #27 F2):
-  - `browser_list_spaces` - List all virtual desktops
-  - `browser_create_space` - Create new Space
-  - `browser_move_to_space` - Move browser to specific Space
-  - `browser_get_window_space` - Query current Space
-  - `browser_send_to_background_space` - Auto-find/create background Space
-  - New `core/spaces.py` with Hammerspoon/yabai/AppleScript backends
-- Documentation: `WINDOW_AND_SPACES.md`, `PERMISSIONS_MACOS.md`
-
-## [Unreleased]
-
-### Added
-- **browser_wait_for_text enhancements** (Issue #22):
-  - Shadow DOM support: Searches across OPEN shadow roots
-  - Element info return: Returns tag, id, className of first matching element
-  - Configurable polling: 500ms default interval (per spec), adjustable via `poll_interval`
-  - Frame support: `frame_name` and `frame_url` parameters for iframe targeting
-  - Clear timeout errors with method info (`immediate`/`poll`/`timeout`)
-- Updated `navigation.md` documentation with complete API reference for wait tools
-
-### Added
-- **Frame tools** (Issue #11, #12, #15):
+- **Frame interaction tools** (Issue #12):
+  - `browser_click_in_frame` — click shadow-DOM elements in frames via Playwright locators
+  - `browser_type_in_frame` — type into fields in frames, also with shadow-DOM support
+- **Shadow-DOM walker improvements**: each item now includes `index` field (matches `browser_click_in_frame`'s index addressing)
+- **Frame tools** (Issue #11, #15):
   - `browser_list_frames` — list all frames on page
   - `browser_eval_in_frame` — run JS in specific frame by name/URL
   - `browser_snapshot_in_frame` — walk frame DOM with shadow-piercing
   - `browser_click_in_frame` — click a (shadow-DOM) element inside one frame,
     e.g. GMX/web.de `list-mail-item` mail rows (Issue #12)
   - `browser_scan_frames` — scan ALL frames for text/regex (unnamed iframe support)
-- `browser_click_checkbox_by_text` (Issue #21) — click a checkbox by its visible
-  label; pierces open shadow DOM, handles custom (non-`<input>`) checkboxes, and
-  is SPA-safe (polls until the label appears).
-- **Smoke test suite** — 59 end-to-end tests covering all tools
+- **Smoke test suite** — 59 end-to-end tests covering all tools (8 new frame interaction tests)
 - `set_active_page` validation (Issue #14) — clear errors instead of cryptic crashes
 - Hints in `browser_snapshot` pointing to frame tools when content is missing
 
@@ -163,10 +130,10 @@ closes this gap with a full CDP event stream.
 - `browser_screen_record_analyze` was a placeholder — now returns ordered Base64 PNG keyframes for the vision-capable agent
 
 ### Documentation
-- Tool count: 52 -> 64 (added learning, screen_record, and re-organized categorization)
+- Tool count: 46 -> 54
 - Added `frames.md`, `network_intercept.md`, `smart_tools.md`
 - COOKBOOK: Recipes 9-10 for unnamed iframes and shadow DOM
-- API.md: Full reference for all 52 tools
+- API.md: Full reference for all 54 tools
 
 ## [1.0.0] - 2026-05-15
 

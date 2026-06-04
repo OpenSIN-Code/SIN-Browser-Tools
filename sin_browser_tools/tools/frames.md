@@ -60,6 +60,36 @@ await browser_scan_frames(regex=r"\d{6}")
 await browser_scan_frames(include_empty=True)
 ```
 
+### `browser_click_in_frame(selector, index=0, frame_name=None, frame_url=None, text_filter=None)`
+Click an element inside a frame via a Playwright locator, which **pierces open
+shadow DOM** and dispatches a trusted click. Solves Issue #12: a plain
+`evaluate(el => el.click())` is unreliable on shadow-DOM custom elements, whereas
+a locator reaches them.
+
+```python
+# Click the 2nd email row (0-based) in the "mail" frame
+await browser_click_in_frame(selector="list-mail-item", index=1, frame_name="mail")
+
+# Or pick the row by its text (sender/subject) instead of an index
+await browser_click_in_frame(selector="list-mail-item", text_filter="Invoice", frame_name="mail")
+# {"status": "clicked", "matched": 1, "index": 0, ...}
+```
+
+The `index` lines up with the `index` field returned by
+`browser_snapshot_in_frame` (both use document order), so you can snapshot to
+read the rows, then click the one you want by its index. Returns a helpful
+`error` (unknown frame, no match, or index out of range) instead of raising.
+
+### `browser_type_in_frame(selector, text, index=0, frame_name=None, frame_url=None, text_filter=None, clear=True, submit=False)`
+Type into a field inside a frame, also piercing open shadow DOM. The locator-based
+companion to `browser_click_in_frame` for forms in same-process iframes / shadow DOM.
+
+```python
+# Replace a search box's value and submit it, inside the "mail" frame
+await browser_type_in_frame(selector="input[type=search]", text="invoice",
+                            frame_name="mail", submit=True)
+```
+
 ## GMX Webmail Workflow (Issue #11 + #15)
 
 ```text
@@ -69,10 +99,11 @@ browser_snapshot -> find login form -> browser_fill/click
 
 # 2. Read email list (shadow DOM in named iframe)
 browser_snapshot_in_frame(frame_name="mail", selector="list-mail-item")
-# Returns: [{"text": "Invoice from X"}, {"text": "Welcome aboard"}, ...]
+# Returns: [{"index": 0, "text": "Invoice from X"}, {"index": 1, "text": "Welcome aboard"}, ...]
 
-# 3. Click an email (may need force=True for overlay)
-browser_click("@e5", force=True)
+# 3. Click an email by snapshot index (fixes Issue #12)
+browser_click_in_frame(selector="list-mail-item", index=1, frame_name="mail")
+# Or by text: browser_click_in_frame(selector="list-mail-item", text_filter="Welcome", frame_name="mail")
 
 # 4. Read email body (unnamed iframe)
 browser_scan_frames(pattern="Your verification code")
